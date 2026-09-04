@@ -1,5 +1,5 @@
 # KoduDisain – Portainer / Docker Compose
-# Frontend :8080  |  PocketBase :8090 (admin /_/ )
+# Frontend :8085  |  PocketBase :8090 (admin /_/ )
 #
 # GitHub → Portainer: Stacks → Add stack → Repository
 
@@ -33,7 +33,7 @@ services:
     container_name: kodu-web
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:80"
+      - "${PORT:-8085}:80"
     environment:
       # Brauseri PB URL. Vaikimisi sama host, port 8090.
       # Nginx proksi: PB_PUBLIC_URL=/pb
