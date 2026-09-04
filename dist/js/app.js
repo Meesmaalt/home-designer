@@ -101,7 +101,6 @@ const layers = {
   scenery: new THREE.Group(),
   furniture: new THREE.Group(),
   grid: new THREE.Group(),
-  trace: new THREE.Group(),
   dims: new THREE.Group(),
 };
 Object.values(layers).forEach(g => scene.add(g));
@@ -134,9 +133,6 @@ buildSaunaFloors();
 // ---- Walls / rooms data ----
 let walls = []; // { id, x1, z1, x2, z2, h, t, mat, openings: [] }
 let rooms = []; // { id, name, x, z }
-let measurements = []; // { id, x1, z1, x2, z2 }
-let traceMeta = null; // { dataUrl, name, bytes, width, opacity, x, z, visible }
-let traceMesh = null;
 const wallMeshes = new Map();
 const planSymbols = new THREE.Group();
 layers.building.add(planSymbols);
@@ -271,38 +267,6 @@ function rebuildDims() {
     sp.position.set(mx, FLOOR_Y + (w.h || H) + 0.25, mz);
     sp.scale.set(1.0, 0.25, 1);
     layers.dims.add(sp);
-  });
-  measurements.forEach(m => {
-    const len = Math.hypot(m.x2 - m.x1, m.z2 - m.z1);
-    if (len < 0.05) return;
-    const y = FLOOR_Y + 0.09;
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(m.x1, y, m.z1),
-        new THREE.Vector3(m.x2, y, m.z2),
-      ]),
-      new THREE.LineDashedMaterial({ color: 0x176b52, dashSize: 0.14, gapSize: 0.08, depthTest: false })
-    );
-    line.computeLineDistances();
-    line.renderOrder = 8;
-    layers.dims.add(line);
-    [[m.x1, m.z1], [m.x2, m.z2]].forEach(([x, z]) => {
-      const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.055, 12, 8),
-        new THREE.MeshBasicMaterial({ color: 0x176b52, depthTest: false })
-      );
-      dot.position.set(x, y, z); dot.renderOrder = 9; layers.dims.add(dot);
-    });
-    const c = document.createElement('canvas');
-    c.width = 160; c.height = 42;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#176b52'; ctx.beginPath(); ctx.roundRect(2, 2, 156, 38, 10); ctx.fill();
-    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 19px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(len.toFixed(2) + ' m', 80, 21);
-    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
-    sp.position.set((m.x1 + m.x2) / 2, y + 0.13, (m.z1 + m.z2) / 2);
-    sp.scale.set(1.15, 0.3, 1); sp.renderOrder = 10; layers.dims.add(sp);
   });
 }
 
@@ -567,13 +531,6 @@ function buildPlanSvg() {
   rooms.forEach(r => {
     s += `<text x="${sx(r.x)}" y="${sz(r.z)}" font-size="12" fill="#1a4060" text-anchor="middle" font-family="system-ui" font-weight="600">${escapeHtml(r.name)}</text>`;
   });
-  measurements.forEach(m => {
-    const len = Math.hypot(m.x2 - m.x1, m.z2 - m.z1);
-    const mx = (m.x1 + m.x2) / 2, mz = (m.z1 + m.z2) / 2;
-    s += `<line x1="${sx(m.x1)}" y1="${sz(m.z1)}" x2="${sx(m.x2)}" y2="${sz(m.z2)}" stroke="#176b52" stroke-width="2" stroke-dasharray="5 4"/>`;
-    s += `<circle cx="${sx(m.x1)}" cy="${sz(m.z1)}" r="3" fill="#176b52"/><circle cx="${sx(m.x2)}" cy="${sz(m.z2)}" r="3" fill="#176b52"/>`;
-    s += `<text x="${sx(mx)}" y="${sz(mz) - 7}" font-size="11" fill="#176b52" text-anchor="middle" font-family="system-ui" font-weight="700">${len.toFixed(2)} m</text>`;
-  });
   // scale bar
   s += `<line x1="20" y1="${Hsvg - 16}" x2="${20 + (1 / bw) * (Wsvg - 40)}" y2="${Hsvg - 16}" stroke="#000" stroke-width="2"/>`;
   s += `<text x="20" y="${Hsvg - 4}" font-size="10" fill="#555" font-family="system-ui">1 m</text>`;
@@ -818,76 +775,6 @@ function allEditable() {
   return list;
 }
 
-function clearTraceMesh() {
-  if (!traceMesh) return;
-  layers.trace.remove(traceMesh);
-  traceMesh.geometry?.dispose();
-  traceMesh.material?.map?.dispose();
-  traceMesh.material?.dispose();
-  traceMesh = null;
-}
-
-function syncTraceUi() {
-  const hasTrace = !!traceMeta;
-  document.getElementById('btn-trace-open')?.classList.toggle('hidden', hasTrace);
-  document.getElementById('trace-controls')?.classList.toggle('hidden', !hasTrace);
-  if (!hasTrace) return;
-  const name = document.getElementById('trace-name');
-  const size = document.getElementById('trace-size');
-  const width = document.getElementById('trace-width');
-  const opacity = document.getElementById('trace-opacity');
-  const opacityValue = document.getElementById('trace-opacity-value');
-  const toggle = document.getElementById('btn-trace-toggle');
-  if (name) name.textContent = traceMeta.name || 'Alusplaan';
-  if (size) size.textContent = traceMeta.bytes ? `${Math.max(1, Math.round(traceMeta.bytes / 1024))} KB · ${traceMeta.width || 10} m lai` : `${traceMeta.width || 10} m lai`;
-  if (width) width.value = traceMeta.width || 10;
-  if (opacity) opacity.value = Math.round((traceMeta.opacity ?? 0.38) * 100);
-  if (opacityValue) opacityValue.textContent = `${Math.round((traceMeta.opacity ?? 0.38) * 100)}%`;
-  if (toggle) toggle.textContent = traceMeta.visible === false ? 'Näita' : 'Peida';
-}
-
-function updateTraceVisibility() {
-  layers.trace.visible = !!traceMeta && traceMeta.visible !== false && viewMode !== '3d';
-  const cb = document.querySelector('[data-layer="trace"]');
-  if (cb) cb.checked = !!traceMeta && traceMeta.visible !== false;
-}
-
-function rebuildTrace() {
-  clearTraceMesh();
-  syncTraceUi();
-  if (!traceMeta?.dataUrl) { updateTraceVisibility(); return; }
-  const expectedData = traceMeta.dataUrl;
-  new THREE.TextureLoader().load(expectedData, tex => {
-    if (!traceMeta || traceMeta.dataUrl !== expectedData) { tex.dispose(); return; }
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const imageWidth = tex.image?.naturalWidth || tex.image?.width || 1;
-    const imageHeight = tex.image?.naturalHeight || tex.image?.height || 1;
-    const width = Math.max(1, Number(traceMeta.width) || 10);
-    const height = width * imageHeight / imageWidth;
-    const material = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true,
-      opacity: traceMeta.opacity ?? 0.38,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    traceMesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
-    traceMesh.rotation.x = -Math.PI / 2;
-    traceMesh.position.set(traceMeta.x ?? controls.target.x, FLOOR_Y + 0.035, traceMeta.z ?? controls.target.z);
-    traceMesh.renderOrder = 1;
-    layers.trace.add(traceMesh);
-    updateTraceVisibility();
-    syncTraceUi();
-  }, undefined, () => setStatus('Alusplaani pilti ei õnnestunud avada'));
-}
-
-function removeTrace() {
-  clearTraceMesh();
-  traceMeta = null;
-  syncTraceUi();
-  updateTraceVisibility();
-}
-
 function clearEditable() {
   deselect();
   [layers.scenery, layers.furniture].forEach(layer => {
@@ -895,8 +782,6 @@ function clearEditable() {
   });
   walls = [];
   rooms = [];
-  measurements = [];
-  removeTrace();
   wallMeshes.forEach(m => layers.building.remove(m));
   wallMeshes.clear();
   roomSprites.forEach(s => layers.building.remove(s));
@@ -975,8 +860,6 @@ function snap() {
   return {
     walls: JSON.parse(JSON.stringify(walls)),
     rooms: JSON.parse(JSON.stringify(rooms)),
-    measurements: JSON.parse(JSON.stringify(measurements)),
-    trace: traceMeta ? { ...traceMeta } : null,
     objects: allEditable().filter(o => o.userData.kind !== 'wall' && o.userData.kind !== 'room').map(o => ({
       type: o.userData.type, uid: o.userData.uid, kind: o.userData.kind,
       x: o.position.x, y: o.position.y, z: o.position.z, ry: o.rotation.y, s: o.scale.x,
@@ -992,11 +875,8 @@ function restore(s) {
   clearEditable();
   walls = s.walls || [];
   rooms = s.rooms || [];
-  measurements = s.measurements || [];
-  traceMeta = s.trace ? { ...s.trace } : null;
   rebuildAllWalls();
   rebuildRooms();
-  rebuildTrace();
   (s.objects || []).forEach(x => {
     const o = addAsset(x.type, x.x, x.z, x.ry, x.s || 1);
     if (o) { o.userData.uid = x.uid; o.position.y = x.y; }
@@ -1020,7 +900,7 @@ function payload() {
 }
 function apply(data) {
   if (data.name) document.getElementById('project-name').value = data.name;
-  restore({ walls: data.walls || [], rooms: data.rooms || [], measurements: data.measurements || [], trace: data.trace || null, objects: data.objects || data.layout || [] });
+  restore({ walls: data.walls || [], rooms: data.rooms || [], objects: data.objects || data.layout || [] });
   history.length = 0; pushHist();
 }
 
@@ -1235,75 +1115,21 @@ function scrollCatalogTo(category) {
 document.querySelector('[data-scroll-catalog]')?.addEventListener('click', () => scrollCatalogTo('Sisustus'));
 document.querySelector('[data-scroll-landscape]')?.addEventListener('click', () => scrollCatalogTo('Maastik'));
 
-// Trace image
-const traceFile = document.getElementById('trace-file');
-document.getElementById('btn-trace-open')?.addEventListener('click', () => traceFile?.click());
-traceFile?.addEventListener('change', () => {
-  const file = traceFile.files?.[0];
-  traceFile.value = '';
-  if (!file) return;
-  if (!file.type.startsWith('image/')) { setStatus('Vali JPG, PNG või WebP pilt'); return; }
-  if (file.size > 8 * 1024 * 1024) { setStatus('Alusplaani fail võib olla kuni 8 MB'); return; }
-  const reader = new FileReader();
-  reader.onload = () => {
-    traceMeta = {
-      dataUrl: String(reader.result), name: file.name, bytes: file.size,
-      width: 10, opacity: 0.38, x: controls.target.x, z: controls.target.z, visible: true,
-    };
-    rebuildTrace();
-    setViewMode('blueprint');
-    pushHist();
-    setStatus('Alusplaan lisatud – määra selle tegelik laius');
-  };
-  reader.onerror = () => setStatus('Alusplaani faili ei õnnestunud lugeda');
-  reader.readAsDataURL(file);
-});
-document.getElementById('trace-width')?.addEventListener('change', e => {
-  if (!traceMeta) return;
-  traceMeta.width = THREE.MathUtils.clamp(Number(e.target.value) || 10, 1, 100);
-  rebuildTrace(); pushHist(); setStatus(`Alusplaani laius: ${traceMeta.width} m`);
-});
-document.getElementById('trace-opacity')?.addEventListener('input', e => {
-  if (!traceMeta) return;
-  traceMeta.opacity = Number(e.target.value) / 100;
-  if (traceMesh?.material) traceMesh.material.opacity = traceMeta.opacity;
-  const output = document.getElementById('trace-opacity-value');
-  if (output) output.textContent = `${e.target.value}%`;
-});
-document.getElementById('trace-opacity')?.addEventListener('change', () => { if (traceMeta) pushHist(); });
-document.getElementById('btn-trace-center')?.addEventListener('click', () => {
-  if (!traceMeta) return;
-  traceMeta.x = controls.target.x; traceMeta.z = controls.target.z;
-  rebuildTrace(); pushHist(); setStatus('Alusplaan joondatud vaate keskele');
-});
-document.getElementById('btn-trace-toggle')?.addEventListener('click', () => {
-  if (!traceMeta) return;
-  traceMeta.visible = traceMeta.visible === false;
-  updateTraceVisibility(); syncTraceUi(); setStatus(traceMeta.visible ? 'Alusplaan nähtav' : 'Alusplaan peidetud');
-});
-document.getElementById('btn-trace-remove')?.addEventListener('click', () => {
-  if (!traceMeta) return;
-  removeTrace(); pushHist(); setStatus('Alusplaan eemaldatud');
-});
-
 // Draw modes
-let drawMode = null; // wall | room | door | window | measure
+let drawMode = null; // wall | room | door | window
 let wallStart = null;
-let measureStart = null;
 let previewLine = null;
 
 function setDrawMode(mode) {
   drawMode = mode;
   document.querySelectorAll('[data-draw]').forEach(b => b.classList.toggle('active', b.dataset.draw === mode));
   wallStart = null;
-  measureStart = null;
   if (previewLine) { scene.remove(previewLine); previewLine = null; }
   deselect();
   if (mode === 'wall') setDrawHint('Sein: 1. klõps algus, 2. klõps lõpp (2D soovitatud)');
   else if (mode === 'room') setDrawHint('Ruum: klõpsa asukohta, siis muuda nime');
   else if (mode === 'door') setDrawHint('Uks: klõpsa seinal');
   else if (mode === 'window') setDrawHint('Aken: klõpsa seinal');
-  else if (mode === 'measure') setDrawHint('Mõõdulint: klõpsa algus- ja lõpp-punkt');
   else setDrawHint('');
   setStatus(mode ? 'Joonistus: ' + mode : 'Valmis');
 }
@@ -1388,23 +1214,6 @@ function onDrawClick(event) {
     return true;
   }
 
-  if (drawMode === 'measure') {
-    if (!measureStart) {
-      measureStart = { x: p.x, z: p.z };
-      setDrawHint(`Mõõdulint: vali lõpp-punkt · algus ${p.x.toFixed(1)}, ${p.z.toFixed(1)}`);
-    } else {
-      const length = Math.hypot(p.x - measureStart.x, p.z - measureStart.z);
-      if (length >= 0.1) {
-        measurements.push({ id: uid(), x1: measureStart.x, z1: measureStart.z, x2: p.x, z2: p.z });
-        rebuildDims(); pushHist(); setStatus(`Mõõt lisatud: ${length.toFixed(2)} m`);
-      }
-      measureStart = null;
-      if (previewLine) { scene.remove(previewLine); previewLine = null; }
-      setDrawHint('Mõõdulint: klõpsa järgmine alguspunkt');
-    }
-    return true;
-  }
-
   if (drawMode === 'door' || drawMode === 'window') {
     const hit = nearestWall(p.x, p.z);
     if (!hit) { setStatus('Klõpsa seina lähedale'); return true; }
@@ -1443,16 +1252,15 @@ canvas.addEventListener('pointermove', e => {
     showWallHandles(w.id);
     return;
   }
-  const start = drawMode === 'wall' ? wallStart : drawMode === 'measure' ? measureStart : null;
-  if (!start) return;
+  if (drawMode !== 'wall' || !wallStart) return;
   const p = groundPoint(e);
   if (!p) return;
   if (previewLine) scene.remove(previewLine);
   const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(start.x, drawMode === 'measure' ? FLOOR_Y + 0.09 : 0.05, start.z),
-    new THREE.Vector3(p.x, drawMode === 'measure' ? FLOOR_Y + 0.09 : 0.05, p.z),
+    new THREE.Vector3(wallStart.x, 0.05, wallStart.z),
+    new THREE.Vector3(p.x, 0.05, p.z),
   ]);
-  previewLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: drawMode === 'measure' ? 0x176b52 : 0x3d8bfd, depthTest: false }));
+  previewLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x3d8bfd }));
   scene.add(previewLine);
 });
 

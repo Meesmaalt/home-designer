@@ -52,24 +52,9 @@
             <button id="tool-room" data-draw="room" title="Lisa ruumi silt"><span class="tool-icon">▦</span><span>Ruum</span></button>
             <button id="tool-door" data-draw="door" title="Lisa uks seinale"><span class="tool-icon">◧</span><span>Uks</span></button>
             <button id="tool-window" data-draw="window" title="Lisa aken seinale"><span class="tool-icon">⊞</span><span>Aken</span></button>
-            <button id="tool-measure" data-draw="measure" title="Mõõda kahe punkti vahe (M)"><span class="tool-icon">↔</span><span>Mõõda</span></button>
           </div>
-          <p class="hint-sm">Vali tööriist ja klõpsa plaanil. Mõõdulint ja sein lukustuvad 10 cm ruudustikule.</p>
+          <p class="hint-sm">Vali tööriist ja klõpsa plaanil. Seina pikkust saad hiljem otspunktidest täpsustada.</p>
         </section>
-        <details class="trace-card" open>
-          <summary><span><i class="trace-mark">⌁</i> Alusplaan</span><small>Joonista pildi peale</small></summary>
-          <div class="trace-card-body">
-            <p>Lisa olemasolev JPG, PNG või WebP plaan ja kasuta seda seinte joonistamisel alusena.</p>
-            <button id="btn-trace-open" class="block trace-upload"><span>＋</span> Lisa alusplaan</button>
-            <input type="file" id="trace-file" accept="image/png,image/jpeg,image/webp" hidden />
-            <div id="trace-controls" class="trace-controls hidden">
-              <div class="trace-file-row"><span class="trace-file-icon">▧</span><div><strong id="trace-name">Alusplaan</strong><small id="trace-size">Pilt</small></div><button id="btn-trace-remove" class="icon-button danger" title="Eemalda alusplaan" aria-label="Eemalda alusplaan">×</button></div>
-              <label>Laius päriselus <span><input id="trace-width" type="number" min="1" max="100" step="0.5" value="10" /> m</span></label>
-              <label>Läbipaistvus <output id="trace-opacity-value">38%</output><input id="trace-opacity" type="range" min="10" max="85" value="38" /></label>
-              <div class="trace-actions"><button id="btn-trace-center">Keskele</button><button id="btn-trace-toggle">Peida</button></div>
-            </div>
-          </div>
-        </details>
         <section class="tool-section library-section">
           <div class="section-label"><span>Objektikogu</span><small id="catalog-count"></small></div>
           <label class="search-field"><span>⌕</span><input id="catalog-search" type="search" placeholder="Otsi mööblit ja objekte" autocomplete="off" /></label>
@@ -136,7 +121,6 @@
             <label><span><i class="layer-swatch furniture"></i>Sisustus</span><input type="checkbox" data-layer="furniture" checked /></label>
             <label><span><i class="layer-swatch grid"></i>Ruudustik</span><input type="checkbox" data-layer="grid" checked /></label>
             <label><span><i class="layer-swatch dims"></i>Mõõdud</span><input type="checkbox" data-layer="dims" checked /></label>
-            <label><span><i class="layer-swatch trace"></i>Alusplaan</span><input type="checkbox" data-layer="trace" checked /></label>
           </div>
         </details>
         <details class="inspector-card" open>
