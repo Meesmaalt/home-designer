@@ -6,16 +6,7 @@ import PocketBase from 'https://cdn.jsdelivr.net/npm/pocketbase@0.21.5/+esm';
 function resolvePbUrl() {
   const env = (typeof window !== 'undefined' && window.__ENV__) || {};
   if (env.PB_URL) return String(env.PB_URL).replace(/\/$/, '');
-  // /pb proksi (nginx)
-  if (location.port === '8080' || location.port === '80' || !location.port) {
-    // try same-origin /pb first when deployed with proxy
-  }
-  // Otse: same hostname, port 8090
-  const proto = location.protocol === 'https:' ? 'https:' : 'http:';
-  if (location.port && location.port !== '80' && location.port !== '443') {
-    return `${proto}//${location.hostname}:8090`;
-  }
-  return `${proto}//${location.hostname}:8090`;
+  return typeof location !== 'undefined' ? location.origin : '';
 }
 
 export const pb = new PocketBase(resolvePbUrl());

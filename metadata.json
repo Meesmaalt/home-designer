@@ -1,0 +1,8 @@
+{
+  "name": "KoduDisain",
+  "description": "Kodu, aia ja hoone 3D/2D planeerija, arhitektuurne plaan ja ehituslik kalkulatsioon",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
