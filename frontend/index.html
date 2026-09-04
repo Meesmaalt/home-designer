@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KoduDisain – etapp 2–3</title>
+  <link rel="stylesheet" href="css/app.css" />
+  <script src="env.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand">
+        <span class="logo">KD</span>
+        <div>
+          <strong>KoduDisain</strong>
+          <small>Konto · pilv · jagamine · 2D/3D</small>
+        </div>
+      </div>
+      <div class="top-actions">
+        <input type="text" id="project-name" value="Minu krunt" title="Projekti nimi" />
+        <button id="btn-new" title="Uus">🗋 Uus</button>
+        <button id="btn-open">📂 JSON</button>
+        <button id="btn-save">📄 JSON</button>
+        <button id="btn-cloud-save" class="primary" title="Salvesta konto alla">☁ Pilv</button>
+        <button id="btn-my-projects" title="Minu projektid">📁</button>
+        <input type="file" id="file-open" accept=".json,application/json" hidden />
+        <span class="auth-chip">
+          <button id="btn-login">Logi sisse</button>
+          <span id="user-label" class="hidden"></span>
+          <button id="btn-logout" class="hidden">Välja</button>
+        </span>
+      </div>
+      <div class="view-modes">
+        <button id="mode-3d" class="active">3D</button>
+        <button id="mode-2d">2D</button>
+      </div>
+    </header>
+
+    <div id="workspace">
+      <aside id="catalog">
+        <h2>Kataloog</h2>
+        <div id="catalog-list"></div>
+        <h2>Joonistamine</h2>
+        <div class="draw-tools">
+          <button id="tool-wall" data-draw="wall" title="Joonista sein (2 klõpsu)">🧱 Sein</button>
+          <button id="tool-room" data-draw="room" title="Ruumi silt">🏷 Ruum</button>
+          <button id="tool-door" data-draw="door" title="Uks seina peale">🚪 Uks seina</button>
+          <button id="tool-window" data-draw="window" title="Aken seina peale">🪟 Aken seina</button>
+        </div>
+        <p class="hint-sm">2D režiimis: Sein = 2 klõpsu. Uks/aken = klõps seinal.</p>
+      </aside>
+
+      <main id="viewport">
+        <canvas id="c"></canvas>
+        <div id="hud">
+          <button id="btn-reset-view">↺</button>
+          <button id="btn-top">Pealt</button>
+          <button id="btn-iso">Iso</button>
+          <button id="btn-grid" class="active">Ruudustik</button>
+          <button id="btn-dims" class="active">Mõõdud</button>
+        </div>
+        <div id="toolbar">
+          <button data-tool="select" class="active" title="Vali (V)">↖ Vali</button>
+          <button data-tool="move" title="Liiguta (G)">↔ Liiguta</button>
+          <button data-tool="rotate" title="Pööra (R)">↻ Pööra</button>
+          <button data-tool="scale" title="Skaala (S)">⤢ Skaala</button>
+          <span class="sep"></span>
+          <button id="btn-dup" title="Duplikaat">⧉</button>
+          <button id="btn-del" class="danger" title="Kustuta" disabled>✕</button>
+          <button id="btn-undo" title="Undo">↶</button>
+        </div>
+        <div id="draw-hint" class="hidden"></div>
+        <div id="status">Valmis</div>
+      </main>
+
+      <aside id="props-panel">
+        <h2>Omadused</h2>
+        <div id="props-empty" class="muted">Vali objekt või joonista sein</div>
+        <div id="props-form" class="hidden">
+          <label>Tüüp <input id="p-type" readonly /></label>
+          <label>Nimi <input id="p-name" placeholder="valikuline" /></label>
+          <label>X <input type="number" id="p-x" step="0.1" /></label>
+          <label>Y <input type="number" id="p-y" step="0.1" /></label>
+          <label>Z <input type="number" id="p-z" step="0.1" /></label>
+          <label>Pööre ° <input type="number" id="p-ry" step="5" /></label>
+          <label>Skaala <input type="number" id="p-s" step="0.05" min="0.1" max="5" /></label>
+          <div id="props-wall" class="hidden">
+            <label>Pikkus m <input id="p-len" readonly /></label>
+            <label>Kõrgus m <input type="number" id="p-wh" step="0.05" min="1" max="4" /></label>
+            <label>Paksus m <input type="number" id="p-wt" step="0.01" min="0.05" max="0.5" /></label>
+          </div>
+          <div id="props-mat" class="hidden">
+            <label>Materjal
+              <select id="p-mat">
+                <option value="wood">Puit</option>
+                <option value="plaster">Krohv / hele</option>
+                <option value="brick">Tellis</option>
+                <option value="dark">Tume puit</option>
+                <option value="concrete">Betoon</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <h2>Kihid</h2>
+        <div class="layers">
+          <label><input type="checkbox" data-layer="building" checked /> Hoone / seinad</label>
+          <label><input type="checkbox" data-layer="scenery" checked /> Maastik</label>
+          <label><input type="checkbox" data-layer="furniture" checked /> Sisustus</label>
+          <label><input type="checkbox" data-layer="grid" checked /> Ruudustik</label>
+          <label><input type="checkbox" data-layer="dims" checked /> Mõõdud</label>
+        </div>
+
+        <h2>Ruumid</h2>
+        <div id="room-list" class="obj-list"></div>
+
+        <h2>Objektid</h2>
+        <div id="obj-list" class="obj-list"></div>
+
+        <h2>Pakkumine (ori.)</h2>
+        <div id="quote-box" class="quote-box"></div>
+        <button id="btn-quote" class="block">📋 Uuenda / prindi</button>
+
+        <h2>Mallid</h2>
+        <button id="btn-template-sauna" class="block">Saunakrunt + seinad</button>
+        <h2>Jagamine</h2>
+        <button id="btn-share" class="block">🔗 Loo jagamislink</button>
+        <p id="share-url" class="hint-sm"></p>
+        <p class="hint">JSON jääb tööle offline. Pilv vajab sisselogimist + PocketBase (Docker).</p>
+        <p class="hint">Etapp 2: seinad 2D-s, ruumid, uksed/aknad seintel. Etapp 3: materjalid, pakkumine. JSON salvestus.</p>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Auth -->
+  <div id="auth-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="auth-title">Logi sisse</h3>
+      <p id="auth-status" class="muted"></p>
+      <label>E-post <input type="email" id="auth-email" autocomplete="username" /></label>
+      <label>Parool <input type="password" id="auth-pass" autocomplete="current-password" /></label>
+      <label id="auth-name-wrap" class="hidden">Nimi <input type="text" id="auth-name" /></label>
+      <div class="modal-actions">
+        <button id="auth-submit" class="primary">Logi sisse</button>
+        <button id="auth-toggle" type="button">Loo konto</button>
+        <button id="auth-close" type="button">Sulge</button>
+      </div>
+      <p class="hint-sm">Konto salvestab projektid PocketBase'i – sama konto telefonis ja arvutis.</p>
+    </div>
+  </div>
+
+  <div id="projects-modal" class="modal hidden">
+    <div class="modal-box wide">
+      <h3>Minu projektid (pilv)</h3>
+      <div id="projects-list" class="projects-list"></div>
+      <div class="modal-actions">
+        <button id="projects-close">Sulge</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

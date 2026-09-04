@@ -1,0 +1,46 @@
+# KoduDisain – Portainer / Docker Compose
+# Frontend :8080  |  PocketBase :8090 (admin /_/ )
+#
+# GitHub → Portainer: Stacks → Add stack → Repository
+
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: kodu-pb
+    restart: unless-stopped
+    ports:
+      - "${PB_PORT:-8090}:8090"
+    volumes:
+      - pb_data:/pb_data
+      - ./pb/pb_migrations:/pb_migrations:ro
+    command:
+      - --migrationsDir=/pb_migrations
+    environment:
+      PB_ADMIN_EMAIL: "${PB_ADMIN_EMAIL:-admin@kodu.local}"
+      PB_ADMIN_PASSWORD: "${PB_ADMIN_PASSWORD:-kodu123456}"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/api/health"]
+      interval: 8s
+      timeout: 5s
+      retries: 8
+      start_period: 25s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: kodu-disain-web:latest
+    container_name: kodu-web
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:80"
+    environment:
+      # Brauseri PB URL. Vaikimisi sama host, port 8090.
+      # Nginx proksi: PB_PUBLIC_URL=/pb
+      PB_PUBLIC_URL: "${PB_PUBLIC_URL:-}"
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+
+volumes:
+  pb_data:

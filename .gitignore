@@ -1,0 +1,6 @@
+.DS_Store
+.env
+*.log
+pb_data/
+**/node_modules/
+*.zip
