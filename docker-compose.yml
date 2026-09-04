@@ -9,7 +9,7 @@ services:
     container_name: kodu-pb
     restart: unless-stopped
     ports:
-      - "${PB_PORT:-8090}:8090"
+      - "${PB_PORT:-8095}:8090"
     volumes:
       - pb_data:/pb_data
       - ./pb/pb_migrations:/pb_migrations:ro
@@ -33,7 +33,7 @@ services:
     container_name: kodu-web
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:80"
+      - "${PORT:-8085}:80"
     environment:
       # Brauseri PB URL. Vaikimisi sama host, port 8090.
       # Nginx proksi: PB_PUBLIC_URL=/pb
