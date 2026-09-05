@@ -174,6 +174,10 @@
                 <span class="tool-icon">⊞</span>
                 <span>Aken</span>
               </button>
+              <button id="tool-paint" data-draw="paint" title="Materjalipintsel (B) - klõpsa seinal või põrandal viimistluse vahetamiseks">
+                <span class="tool-icon">🎨</span>
+                <span>Pintsel</span>
+              </button>
               <button id="tool-measure" data-draw="measure" title="Mõõda kahe punkti vahe (M)">
                 <span class="tool-icon">↔</span>
                 <span>Mõõdulint</span>
@@ -333,18 +337,45 @@
             <button id="mode-walk" title="Jalutuskäik esimeses isikus (silmade kõrguselt 1.7 m)">🚶 Jaluta</button>
             <button id="btn-photo-mode" title="Kinematograafiline stuudiorežiim & fotorealistlik renderdus">📸 Fotorežiim</button>
           </div>
+          <div class="shading-modes" id="shading-modes" aria-label="Blender vaaterežiimid">
+            <button id="shading-wire" class="shading-btn" title="Traatraamistik (Wireframe, kiirklahv Z) - karkass ja konstruktsioon">🌐 Traat</button>
+            <button id="shading-solid" class="shading-btn" title="CAD Savimudel (Solid Clay MatCap) - puhas arhitektuurne kuju, ülimadal graafikakoormus">🏺 Savi</button>
+            <button id="shading-material" class="shading-btn active" title="Materjalide eelvaade (Material Preview) - realistlikud viimistlused ja tekstuurid">🎨 Materjal</button>
+            <button id="shading-rendered" class="shading-btn" title="Päike & Varjud (Rendered) - kontaktvarjud ja meeleoluvalgustus">☀️ Varjud</button>
+          </div>
+        </div>
+
+        <!-- BLENDER 3D ORIENTATSIOONI GIZMO -->
+        <div id="blender-nav-gizmo" class="blender-nav-gizmo" title="Blenderi 3D teljed: klõpsa telge (X küljelt, Y pealt, Z eest) või lohista orbiidiks">
+          <canvas id="gizmo-canvas" width="96" height="96"></canvas>
+          <div class="gizmo-actions">
+            <button id="gizmo-persp-toggle" class="gizmo-action-btn" title="Perspektiiv / Orto vaade (Numpad 5)">Orto</button>
+            <button id="gizmo-focus-btn" class="gizmo-action-btn" title="Fokusseeri valitud objektile (Numpad . / F)">🎯</button>
+          </div>
         </div>
 
         <!-- HUD: Kaamera, valgus, katus ja mõõdud -->
         <div id="hud" aria-label="Kaamera ja kuva valikud">
           <button id="btn-reset-view" class="icon-button" title="Taasta kaamera asukoht" aria-label="Taasta vaade">⌂</button>
-          <button id="btn-top" title="Vaata otse pealt">Pealt</button>
-          <button id="btn-iso" title="Isomeetriline vaade">Nurga alt</button>
+          <button id="btn-top" title="Vaata otse pealt (Numpad 7)">Pealt</button>
+          <button id="btn-front" title="Vaata otse eest (Numpad 1)">Eest</button>
+          <button id="btn-side" title="Vaata küljelt (Numpad 3)">Küljelt</button>
+          <button id="btn-iso" title="Isomeetriline vaade">Nurk</button>
+          <span class="hud-divider"></span>
+          <button id="btn-focus-selected" title="Fokusseeri valitud objektile (F / .)">🎯 Fookus</button>
           <span class="hud-divider"></span>
           <button id="btn-zoom-out" class="icon-button" title="Suumi välja" aria-label="Suumi välja">−</button>
           <button id="btn-zoom-in" class="icon-button" title="Suumi sisse" aria-label="Suumi sisse">＋</button>
           <span class="hud-divider"></span>
+          <div class="hud-level-selector" title="Aktiivne korrus: 1. korrus, 2. korrus või kõik korrused">
+            <button id="btn-level-0" class="hud-level-btn active" data-level="0">1. K</button>
+            <button id="btn-level-1" class="hud-level-btn" data-level="1">2. K</button>
+            <button id="btn-level-all" class="hud-level-btn" data-level="all">Kõik</button>
+          </div>
+          <span class="hud-divider"></span>
           <button id="btn-roof" class="active" title="Lülita katuse nähtavust (vaata sisse või väljast)">🏠 Katus</button>
+          <button id="btn-section-cut" title="Maja arhitektuurne ristlõige / dollhouse vaade (kiirklahv C)">✂️ Lõige</button>
+          <button id="btn-shadows" class="active" title="Varjude lüliti (lülita välja aku või vanema arvuti säästmiseks)">🌓 Varjud</button>
           <button id="btn-sun" title="Päevaaja ja päikesevalguse tsükkel (Hommik / Lõuna / Õhtu / Kuldne tund / Öö)">☀️ Päevaaeg</button>
           <button id="btn-indoor-lights" class="active" title="Sisevalgustite ja hubaste meeleolutulede lüliti">💡 Tuled</button>
           <span class="hud-divider"></span>
@@ -354,10 +385,110 @@
             <option value="0.5" selected>0.5 m</option>
             <option value="1.0">1.0 m</option>
           </select>
+          <button id="btn-wall-snap" class="active" title="Mööbli automaatne seina-magnet (haakub seina äärde)">🧲 Seinamagnet</button>
           <button id="btn-grid" class="active" title="Ruudustiku kuvamine">Ruudustik</button>
           <button id="btn-dims" class="active" title="Mõõtude kuvamine seintel">Mõõdud</button>
           <button id="btn-ortho" class="active" title="Lukusta sirgnurgad 90°">📐 Risti</button>
           <button id="btn-ergo" class="active" title="Ergonoomiliste liikumiskoridoride ja vaba ruumi kuvamine">🚶 Ergonoomika</button>
+        </div>
+
+        <!-- KORRUSLÕIKE / SECTION CUT POPOVER -->
+        <div id="section-cut-popover" class="section-cut-popover hidden">
+          <div class="section-cut-header">
+            <strong>✂️ Arhitektuurne ristlõige</strong>
+            <button id="btn-section-cut-close" class="section-cut-close" title="Sulge">✕</button>
+          </div>
+          <div class="section-cut-presets">
+            <button class="sc-preset-btn active" data-height="0">Terve maja</button>
+            <button class="sc-preset-btn" data-height="1.2">Põhiplaan (1.2 m)</button>
+            <button class="sc-preset-btn" data-height="2.2">Kõrge (2.2 m)</button>
+          </div>
+          <div class="section-cut-slider-row">
+            <label>Kõrgus: <span id="section-cut-val">Terve maja</span></label>
+            <input type="range" id="section-cut-slider" min="0.4" max="3.5" step="0.1" value="1.2" />
+          </div>
+        </div>
+
+        <!-- ☀️ PÄIKESE JA INSOLATSIOONI STUUDIO POPOVER -->
+        <div id="solar-study-popover" class="solar-study-popover hidden">
+          <div class="solar-study-header">
+            <div class="solar-study-title-group">
+              <strong>☀️ Päikese & Insolatsiooni Stuudio</strong>
+              <span class="solar-study-subtitle">Valgusuuring ja reaalajas varjud</span>
+            </div>
+            <button id="btn-solar-close" class="solar-close-btn" title="Sulge">✕</button>
+          </div>
+
+          <div class="solar-time-section">
+            <div class="solar-time-display">
+              <span id="solar-time-clock" class="solar-time-clock">13:00</span>
+              <span id="solar-time-status" class="solar-time-status">Keskpäevane ere päike</span>
+            </div>
+            <input type="range" id="solar-time-slider" min="6" max="22" step="0.25" value="13" class="solar-slider" />
+            <div class="solar-time-ticks">
+              <span>06:00</span>
+              <span>09:00</span>
+              <span>12:00</span>
+              <span>15:00</span>
+              <span>18:00</span>
+              <span>21:00</span>
+            </div>
+          </div>
+
+          <div class="solar-seasons-row">
+            <label class="solar-label">Aastaaeg (kõrgusnurk Eestis):</label>
+            <div class="solar-season-pills">
+              <button type="button" class="solar-season-btn active" data-season="summer">☀️ Suvi (~55°)</button>
+              <button type="button" class="solar-season-btn" data-season="equinox">🍂 Kevad/Sügis (~32°)</button>
+              <button type="button" class="solar-season-btn" data-season="winter">❄️ Talv (~8°)</button>
+            </div>
+          </div>
+
+          <div class="solar-metrics-grid">
+            <div class="solar-metric-card">
+              <span class="metric-name">Kõrgusnurk</span>
+              <strong id="solar-altitude-val">53°</strong>
+            </div>
+            <div class="solar-metric-card">
+              <span class="metric-name">Asimuut</span>
+              <strong id="solar-azimuth-val">185° S</strong>
+            </div>
+            <div class="solar-metric-card full-width">
+              <span class="metric-name">Päikesevarjud</span>
+              <strong id="solar-shadow-desc">Pehmed kompaktsed varjud lõunast</strong>
+            </div>
+          </div>
+
+          <div class="solar-actions-row">
+            <button type="button" id="btn-solar-timelapse" class="btn-solar-play">▶ Mängi päeva kulgu</button>
+            <button type="button" id="btn-solar-reset" class="btn-solar-preset">Keskpäev</button>
+          </div>
+        </div>
+
+        <!-- INTERAKTIIVNE MATERJALIPINTSEL & PIPETT -->
+        <div id="material-brush-palette" class="material-brush-palette hidden">
+          <div class="brush-palette-header">
+            <div class="brush-palette-title-group">
+              <span class="brush-palette-title">🎨 Viimistluse pintsel</span>
+              <span class="brush-shortcut-pill">B</span>
+            </div>
+            <div class="brush-header-actions">
+              <button id="btn-brush-eyedropper" class="brush-pipette-btn" title="Pipett (I) - klõpsa mudelil materjali kopeerimiseks">🧪 Pipett</button>
+              <button id="btn-brush-close" class="brush-close-btn" title="Sulge pintsel">✕</button>
+            </div>
+          </div>
+          <div class="brush-palette-tabs">
+            <button class="brush-tab-btn active" data-tab="floor">Põrandad</button>
+            <button class="brush-tab-btn" data-tab="wall">Seinad & fassaad</button>
+          </div>
+          <div class="brush-swatches-grid" id="brush-swatches-grid"></div>
+          <div class="brush-palette-footer">
+            <div class="brush-active-indicator">
+              <span class="brush-preview-dot" id="brush-preview-dot"></span>
+              <strong id="brush-active-label">Tammeparkett</strong>
+            </div>
+            <span class="brush-hint">Klõpsa seinal või põrandal värvimiseks</span>
+          </div>
         </div>
 
         <!-- ERGONOOMIKA & LIIKUMISRUUMI STAATUS -->
@@ -420,7 +551,13 @@
         <div id="status">
           <span class="status-dot"></span>
           <span id="status-text">Valmis</span>
-          <span class="shortcut-help">V Vali · W Sein · R Pööra · Shift Risti · Delete Kustuta · Ctrl+Z Tagasi</span>
+          <div class="cad-readouts">
+            <span id="cad-coords" class="cad-pill" title="Kursori asukoht ruumis (X, Z meetrites)">X: 0.00 m · Z: 0.00 m</span>
+            <span id="cad-snap" class="cad-pill" title="Aktiivne ruudustiku snap">Snap: 0.50 m</span>
+            <span id="cad-shading" class="cad-pill" title="Aktiivne vaaterežiim">Materjal</span>
+            <span id="cad-fps" class="cad-pill fps-pill" title="Kaadrisagedus ja jõudlus">60 FPS</span>
+          </div>
+          <span class="shortcut-help">Numpad: 7 Pealt · 1 Eest · 3 Küljelt · 5 Orto | G Teisalda · R Pööra · S Skaala · F Fookus · Z Shading</span>
         </div>
       </main>
 

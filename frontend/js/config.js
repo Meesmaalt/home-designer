@@ -161,6 +161,15 @@ export const CATALOG = [
       { id: 'houseMain', name: 'Elumaja maht (näidis)', icon: '🏠', eur: 0 },
       { id: 'houseNeigh', name: 'Naabermaja maht', icon: '🏘️', eur: 0 },
     ]
+  },
+  {
+    cat: 'Trepid & Korruste ühendus',
+    desc: 'Sirged trepid, L-pöördega trepid, keerdtrepid ja käsipuud',
+    items: [
+      { id: 'stairsStraight', name: 'Sirge puittrepp käsipuuga (2.8m)', icon: '🪜', eur: 1650 },
+      { id: 'stairsLTurn', name: 'L-pöördega trepp mademega (2.8m)', icon: '🪜', eur: 2400 },
+      { id: 'stairsSpiral', name: 'Metall-puit keerdtrepp (2.8m)', icon: '🌀', eur: 2800 },
+    ]
   }
 ];
 

@@ -352,3 +352,37 @@ export function getLeatherTexture() {
   return tex;
 }
 
+// 11. Arhitektuurne valtsplekk / katusekivi tekstuur
+export function getRoofTileTexture(isRed = false) {
+  const key = isRed ? 'roof_red' : 'roof_dark';
+  if (textureCache.has(key)) return textureCache.get(key);
+  const tex = createProceduralCanvas(256, 256, (ctx, w, h) => {
+    const baseCol = isRed ? '#8a3a2a' : '#2b3038';
+    ctx.fillStyle = baseCol;
+    ctx.fillRect(0, 0, w, h);
+
+    // Klassik-profiili valtsisooned püstisuunas (seams)
+    const seamCount = 6;
+    const seamDist = w / seamCount;
+    for (let i = 0; i <= seamCount; i++) {
+      const sx = i * seamDist;
+      // Valtsisoone vari ja esiletõst
+      ctx.fillStyle = isRed ? '#551f15' : '#14181c';
+      ctx.fillRect(sx - 2, 0, 3, h);
+      ctx.fillStyle = isRed ? 'rgba(255, 160, 140, 0.35)' : 'rgba(160, 185, 210, 0.35)';
+      ctx.fillRect(sx + 1, 0, 2, h);
+    }
+
+    // Horisontaalsed peened paneelipinnad & metalli mikropeegeldus
+    for (let y = 0; y < h; y += 32) {
+      ctx.fillStyle = isRed ? 'rgba(60, 20, 15, 0.25)' : 'rgba(15, 20, 25, 0.25)';
+      ctx.fillRect(0, y, w, 1);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.fillRect(0, y + 1, w, 1);
+    }
+  });
+  tex.repeat.set(6, 6);
+  textureCache.set(key, tex);
+  return tex;
+}
+

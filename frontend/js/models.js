@@ -396,7 +396,7 @@ export const ASSET_BUILDERS = {
         g.add(ch);
       });
     });
-    return mark(g, 'outdoorTable', 'furniture');
+    return mark(g, 'outdoorTable', 'scenery');
   },
   loungeChair: () => {
     const g = new THREE.Group();
@@ -413,7 +413,7 @@ export const ASSET_BUILDERS = {
     umbrella.add(canopy);
     umbrella.position.set(0.8, 0, 0.2);
     g.add(umbrella);
-    return mark(g, 'loungeChair', 'furniture');
+    return mark(g, 'loungeChair', 'scenery');
   },
   bbqGrill: () => {
     const g = new THREE.Group();
@@ -424,7 +424,7 @@ export const ASSET_BUILDERS = {
     g.add(box(0.7, 0.35, 0.5, MAT.metal, -0.4, 1.08, 0));
     // chimney
     g.add(box(0.3, 0.8, 0.3, MAT.brick, -0.4, 1.65, 0));
-    return mark(g, 'bbqGrill', 'furniture');
+    return mark(g, 'bbqGrill', 'scenery');
   },
   gardenLight: () => {
     const g = new THREE.Group();
@@ -432,7 +432,7 @@ export const ASSET_BUILDERS = {
     const lampGlass = createMaterial(0xfff0b3, { r: 0.1, op: 0.85 });
     g.add(cyl(0.08, 0.08, 0.18, lampGlass, 0, 0.82, 0, 8));
     g.add(cyl(0.12, 0.08, 0.06, MAT.metal, 0, 0.93, 0, 8));
-    return mark(g, 'gardenLight', 'furniture');
+    return mark(g, 'gardenLight', 'scenery');
   },
   solarPanel: () => {
     const g = new THREE.Group();
@@ -447,7 +447,7 @@ export const ASSET_BUILDERS = {
     // ground stands
     g.add(cyl(0.03, 0.03, 0.8, frameMat, -0.9, 0.4, -0.4));
     g.add(cyl(0.03, 0.03, 0.8, frameMat, 0.9, 0.4, -0.4));
-    return mark(g, 'solarPanel', 'furniture');
+    return mark(g, 'solarPanel', 'scenery');
   },
   firePit: () => {
     const g = new THREE.Group();
@@ -463,7 +463,7 @@ export const ASSET_BUILDERS = {
     [1.4, -1.4].forEach(z => {
       g.add(cyl(0.18, 0.2, 1.5, MAT.woodDark, 0, 0.18, z, 8).rotateZ(Math.PI / 2));
     });
-    return mark(g, 'firePit', 'furniture');
+    return mark(g, 'firePit', 'scenery');
   },
 
   // --- SISUSTUS ---
@@ -743,7 +743,7 @@ export const ASSET_BUILDERS = {
         g.add(hub);
       });
     });
-    return mark(g, 'carModern', 'furniture');
+    return mark(g, 'carModern', 'scenery');
   },
 
   humanScale: () => {
@@ -762,7 +762,7 @@ export const ASSET_BUILDERS = {
     [-0.23, 0.23].forEach(x => {
       g.add(cyl(0.04, 0.035, 0.65, MAT.humanFig, x, 1.15, 0, 8));
     });
-    return mark(g, 'humanScale', 'furniture');
+    return mark(g, 'humanScale', 'scenery');
   },
 
   // --- ELUTUBA & SISEKUJUNDUS ---
@@ -1322,6 +1322,124 @@ export const ASSET_BUILDERS = {
     light.position.set(0, 0.75, 0);
     g.add(light);
     return mark(g, 'gardenLantern', 'furniture');
+  },
+
+  // --- TREPID & VERTIKAALNE LIIKUMINE ---
+  stairsStraight: () => {
+    const g = new THREE.Group();
+    const stepsCount = 14;
+    const totalH = 2.8;
+    const totalL = 3.2;
+    const width = 0.95;
+    const stepH = totalH / stepsCount;
+    const stepL = totalL / stepsCount;
+
+    // Astmed (Steps / Treads)
+    for (let i = 0; i < stepsCount; i++) {
+      const y = (i + 1) * stepH;
+      const z = -totalL / 2 + i * stepL + stepL / 2;
+      // Astmelaud (tread)
+      g.add(box(width, 0.04, stepL + 0.03, MAT.woodLight, 0, y - 0.02, z));
+      // Esiserv / varvaslaud (riser)
+      g.add(box(width - 0.04, stepH - 0.04, 0.02, MAT.whiteMetal, 0, y - stepH / 2 - 0.02, z - stepL / 2));
+    }
+
+    // Külgmised kandetalad (Stringers)
+    const stringerThick = 0.04;
+    const stringerH = 0.18;
+    const stringerSlopeAngle = Math.atan2(totalH, totalL);
+    const stringerLen = Math.hypot(totalH, totalL);
+
+    [-width / 2, width / 2].forEach(x => {
+      const stringer = box(stringerThick, stringerH, stringerLen, MAT.metal, x, totalH / 2, 0);
+      stringer.rotation.x = stringerSlopeAngle;
+      g.add(stringer);
+
+      // Käsipuu postid ja käsipuu (Handrail & Balustrade)
+      const postH = 0.9;
+      [0, Math.floor(stepsCount / 2), stepsCount - 1].forEach(si => {
+        const py = (si + 1) * stepH;
+        const pz = -totalL / 2 + si * stepL;
+        g.add(cyl(0.018, 0.018, postH, MAT.metal, x, py + postH / 2, pz));
+      });
+      const rail = cyl(0.025, 0.025, stringerLen, MAT.woodDark, x, totalH / 2 + postH, 0);
+      rail.rotation.x = stringerSlopeAngle + Math.PI / 2;
+      g.add(rail);
+    });
+
+    return mark(g, 'stairsStraight', 'furniture');
+  },
+
+  stairsLTurn: () => {
+    const g = new THREE.Group();
+    const totalH = 2.8;
+    const flight1Steps = 7;
+    const flight2Steps = 7;
+    const stepH = totalH / (flight1Steps + flight2Steps);
+    const stepL = 0.26;
+    const width = 0.95;
+
+    // Esimene marss: z-suunas
+    for (let i = 0; i < flight1Steps; i++) {
+      const y = (i + 1) * stepH;
+      const z = -1.1 + i * stepL;
+      g.add(box(width, 0.04, stepL + 0.03, MAT.woodLight, -0.45, y - 0.02, z));
+      g.add(box(width - 0.04, stepH - 0.04, 0.02, MAT.whiteMetal, -0.45, y - stepH / 2 - 0.02, z - stepL / 2));
+    }
+
+    // Vahemade (Landing 1.0m x 1.0m)
+    const landingY = flight1Steps * stepH;
+    const landingZ = -1.1 + flight1Steps * stepL + 0.45;
+    g.add(box(width * 1.9, 0.06, width, MAT.woodLight, 0, landingY - 0.03, landingZ));
+
+    // Teine marss: x-suunas (pöörab 90 kraadi)
+    for (let i = 0; i < flight2Steps; i++) {
+      const y = landingY + (i + 1) * stepH;
+      const x = 0.45 + i * stepL;
+      g.add(box(stepL + 0.03, 0.04, width, MAT.woodLight, x, y - 0.02, landingZ));
+      g.add(box(0.02, stepH - 0.04, width - 0.04, MAT.whiteMetal, x - stepL / 2, y - stepH / 2 - 0.02, landingZ));
+    }
+
+    // Käsipuu toed ja postid
+    g.add(box(0.08, landingY, 0.08, MAT.metal, -width + 0.04, landingY / 2, landingZ + width / 2));
+    g.add(box(0.08, landingY, 0.08, MAT.metal, width - 0.04, landingY / 2, landingZ + width / 2));
+
+    return mark(g, 'stairsLTurn', 'furniture');
+  },
+
+  stairsSpiral: () => {
+    const g = new THREE.Group();
+    const totalH = 2.8;
+    const stepsCount = 16;
+    const stepH = totalH / stepsCount;
+    const radius = 0.85;
+
+    // Keskmine terassammas
+    g.add(cyl(0.06, 0.06, totalH + 0.9, MAT.metal, 0, (totalH + 0.9) / 2, 0, 16));
+
+    // Spiraalselt lahknevad tammeastmed
+    for (let i = 0; i < stepsCount; i++) {
+      const y = (i + 1) * stepH;
+      const angle = (i / stepsCount) * (Math.PI * 1.6);
+      const stepMesh = box(radius, 0.045, 0.28, MAT.woodLight, radius / 2, 0, 0);
+      const stepPivot = new THREE.Group();
+      stepPivot.position.set(0, y, 0);
+      stepPivot.rotation.y = angle;
+      stepPivot.add(stepMesh);
+
+      // Välimine püstpost
+      const outerX = radius - 0.05;
+      const baluster = cyl(0.012, 0.012, 0.88, MAT.metal, outerX, 0.44, 0);
+      stepPivot.add(baluster);
+
+      // Käsipuusegment
+      const railCap = box(0.04, 0.03, 0.32, MAT.woodDark, outerX, 0.88, 0);
+      stepPivot.add(railCap);
+
+      g.add(stepPivot);
+    }
+
+    return mark(g, 'stairsSpiral', 'furniture');
   },
 };
 

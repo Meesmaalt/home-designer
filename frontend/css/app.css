@@ -1463,5 +1463,640 @@ button.block { width: 100%; }
   cursor: grabbing;
 }
 
+/* ==========================================================================
+   BLENDER & DREAMPLAN HYBRID STYLING (SHADING, GIZMO, CAD HUD)
+   ========================================================================== */
+
+/* Shading Modes Toolbar */
+.shading-modes {
+  display: flex;
+  padding: 3px;
+  border: 1px solid rgba(203, 210, 218, 0.9);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
+}
+
+.shading-btn {
+  min-height: 30px;
+  padding: 0.3rem 0.65rem;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 0.73rem;
+  font-weight: 650;
+  cursor: pointer;
+  color: #334155;
+  transition: all 120ms ease;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+.shading-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.shading-btn.active {
+  color: #ffffff;
+  background: #2563eb;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+/* Blender 3D Orientation Navigation Gizmo */
+.blender-nav-gizmo {
+  position: absolute;
+  top: 4.6rem;
+  right: 0.85rem;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+  user-select: none;
+}
+
+#gizmo-canvas {
+  width: 96px;
+  height: 96px;
+  cursor: grab;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.18));
+}
+
+#gizmo-canvas:active {
+  cursor: grabbing;
+}
+
+.gizmo-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(203, 210, 218, 0.9);
+  border-radius: 8px;
+  padding: 2px;
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-sm);
+}
+
+.gizmo-action-btn {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  font-size: 0.7rem;
+  font-weight: 650;
+  border-radius: 5px;
+  cursor: pointer;
+  color: #334155;
+}
+
+.gizmo-action-btn:hover {
+  background: #f1f5f9;
+  color: var(--accent);
+}
+
+.gizmo-action-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
+/* CAD Readouts in Status Bar */
+.cad-readouts {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: 0.6rem;
+}
+
+.cad-pill {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(241, 245, 249, 0.95);
+  border: 1px solid rgba(203, 213, 225, 0.85);
+  border-radius: 5px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.68rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.fps-pill {
+  color: #166534;
+  background: rgba(220, 252, 231, 0.9);
+  border-color: rgba(187, 247, 208, 0.95);
+}
+
+/* ✂️ ARHITEKTUURNE RISTLÕIGE (SECTION CUT POPOVER) */
+.section-cut-popover {
+  position: absolute;
+  top: 98px;
+  left: 20px;
+  z-index: 100;
+  width: 280px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  padding: 0.85rem;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  animation: fadeInDown 0.18s ease-out;
+}
+
+.section-cut-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: #f1f5f9;
+}
+
+.section-cut-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.section-cut-close:hover {
+  color: #ffffff;
+}
+
+.section-cut-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+}
+
+.sc-preset-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  padding: 0.35rem 0.2rem;
+  font-size: 0.72rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+.sc-preset-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+.sc-preset-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.section-cut-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #cbd5e1;
+}
+.section-cut-slider-row label {
+  display: flex;
+  justify-content: space-between;
+}
+.section-cut-slider-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* 🎨 INTERAKTIIVNE MATERJALIPINTSEL & PIPETT (BRUSH PALETTE) */
+.material-brush-palette {
+  position: absolute;
+  top: 98px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  width: 360px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  padding: 0.85rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  animation: fadeInDown 0.2s ease-out;
+}
+
+.brush-palette-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brush-palette-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.brush-palette-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.brush-shortcut-pill {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.brush-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.brush-pipette-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.brush-pipette-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+.brush-pipette-btn.active {
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+}
+
+.brush-close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.brush-close-btn:hover {
+  color: #ffffff;
+}
+
+.brush-palette-tabs {
+  display: flex;
+  gap: 0.3rem;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 3px;
+  border-radius: 8px;
+}
+
+.brush-tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 0.3rem 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.brush-tab-btn:hover {
+  color: #f1f5f9;
+}
+.brush-tab-btn.active {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.brush-swatches-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.45rem;
+}
+
+.brush-swatch-card {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.35rem 0.45rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.brush-swatch-card:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+.brush-swatch-card.active {
+  background: rgba(37, 99, 235, 0.25);
+  border-color: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+}
+
+.brush-swatch-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.brush-swatch-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brush-palette-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 0.5rem;
+  font-size: 0.74rem;
+}
+
+.brush-active-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.brush-preview-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid #ffffff;
+  display: inline-block;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.brush-hint {
+  color: #94a3b8;
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ☀️ PÄIKESE & INSOLATSIOONI STUUDIO (SOLAR STUDY) */
+.solar-study-popover {
+  position: absolute;
+  top: 98px;
+  right: 24px;
+  z-index: 100;
+  width: 340px;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  padding: 0.95rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  animation: fadeInDown 0.2s ease-out;
+}
+
+.solar-study-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.5rem;
+}
+
+.solar-study-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.solar-study-title-group strong {
+  font-size: 0.88rem;
+  color: #fef08a;
+}
+
+.solar-study-subtitle {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.solar-close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.solar-close-btn:hover {
+  color: #ffffff;
+}
+
+.solar-time-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.solar-time-display {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.solar-time-clock {
+  font-family: 'JetBrains Mono', monospace, monospace;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #fef08a;
+}
+
+.solar-time-status {
+  font-size: 0.72rem;
+  color: #cbd5e1;
+  font-weight: 500;
+}
+
+.solar-slider {
+  width: 100%;
+  accent-color: #f59e0b;
+  cursor: pointer;
+  height: 6px;
+}
+
+.solar-time-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: #64748b;
+  padding: 0 2px;
+}
+
+.solar-seasons-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.solar-label {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.solar-season-pills {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3rem;
+}
+
+.solar-season-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  padding: 0.35rem 0.2rem;
+  font-size: 0.68rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+.solar-season-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+.solar-season-btn.active {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+  color: #fef08a;
+  font-weight: 600;
+}
+
+.solar-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.solar-metric-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.solar-metric-card.full-width {
+  grid-column: span 2;
+}
+
+.solar-metric-card .metric-name {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.solar-metric-card strong {
+  font-size: 0.82rem;
+  color: #f8fafc;
+}
+
+.solar-actions-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.btn-solar-play {
+  flex: 2;
+  background: #176b52;
+  border: none;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-solar-play:hover {
+  background: #1c8364;
+  transform: translateY(-1px);
+}
+.btn-solar-play.playing {
+  background: #dc2626;
+}
+
+.btn-solar-preset {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  padding: 0.45rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-solar-preset:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+
+
 
 

@@ -17,6 +17,7 @@ import {
   getParquetTexture,
   getTileTexture,
   getPaverTexture,
+  getRoofTileTexture,
 } from './textures.js';
 import {
   LAYER_MATERIALS,
@@ -54,17 +55,29 @@ const renderer = new THREE.WebGLRenderer({
   logarithmicDepthBuffer: true,
   powerPreference: 'high-performance',
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
+renderer.localClippingEnabled = true;
+
+// Arhitektuurne ristlõige (Section Cut / Dollhouse vaade)
+let sectionCutHeight = 0; // 0 = väljas (terve maja)
+const sectionCutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 100);
 
 // Pehme taeva ja keskkonnavalguse gradient
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x84bfe6);
 scene.fog = new THREE.FogExp2(0xb2d6ee, 0.009);
+
+// CAD dünaamilised mõõteliinid mööbli ja seinte vahel
+const clearanceDimsGroup = new THREE.Group();
+scene.add(clearanceDimsGroup);
+
+// Mööbli automaatne seina-magnet (haakub seina äärde < 0.50m)
+let autoWallSnapEnabled = true;
 
 const cameraPersp = new THREE.PerspectiveCamera(40, 2, 0.2, 200);
 cameraPersp.position.set(L / 2 - 3, 16, W / 2 + 13);
@@ -87,9 +100,20 @@ transform.setTranslationSnap(0.1);
 transform.setRotationSnap(THREE.MathUtils.degToRad(15));
 transform.addEventListener('dragging-changed', e => {
   controls.enabled = !e.value && viewMode !== 'walk';
-  if (!e.value) { pushHist(); refreshQuote(); }
+  if (!e.value) {
+    pushHist();
+    refreshQuote();
+    if (selected) updateClearanceDimensions(selected);
+  }
 });
-transform.addEventListener('objectChange', () => { syncProps(); clampSel(); });
+transform.addEventListener('objectChange', () => {
+  syncProps();
+  clampSel();
+  if (autoWallSnapEnabled && selected?.userData?.movable && selected.userData.kind !== 'wall' && selected.userData.kind !== 'room') {
+    checkAutoWallSnap(selected);
+  }
+  if (selected) updateClearanceDimensions(selected);
+});
 scene.add(transform);
 
 // Valguslahendus & Päevaajad
@@ -99,14 +123,25 @@ scene.add(ambientLight);
 const sun = new THREE.DirectionalLight(0xfff0dd, 1.25);
 sun.position.set(14, 26, 10);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024); // Kiire ja kerge PCF varjukaart
 sun.shadow.camera.left = sun.shadow.camera.bottom = -32;
 sun.shadow.camera.right = sun.shadow.camera.top = 32;
 sun.shadow.camera.near = 1.0;
 sun.shadow.camera.far = 75;
-sun.shadow.bias = -0.00035;
-sun.shadow.normalBias = 0.025;
+sun.shadow.bias = -0.0003;
+sun.shadow.normalBias = 0.02;
 scene.add(sun);
+
+// Blender-stiilis aktiivse valiku oranž kontuur (Highlight Box)
+const selectionBoxHelper = new THREE.BoxHelper(new THREE.Object3D(), 0xff7700);
+selectionBoxHelper.visible = false;
+scene.add(selectionBoxHelper);
+
+// Blender Shading režiimide spetsiaalsed materjalid (Wireframe & Solid Clay CAD)
+const clayMaterial = new THREE.MeshLambertMaterial({ color: 0xdfdfd9, reflectivity: 0.15 });
+const wireMaterial = new THREE.MeshBasicMaterial({ color: 0x334155, wireframe: true });
+let currentShadingMode = 'material'; // 'wire' | 'solid' | 'material' | 'rendered'
+let shadowsEnabled = true;
 
 const hemiLight = new THREE.HemisphereLight(0xd4e9ff, 0x546e45, 0.52);
 scene.add(hemiLight);
@@ -433,9 +468,61 @@ function updateCompassUi() {
   }
 }
 
-// Ruudustik
-const gridHelper = new THREE.GridHelper(50, 100, 0x8899aa, 0x3a4550);
-gridHelper.position.set(L / 2 + 2, 0.01, W / 2);
+// Blender-stiilis professionaalne ruudustik ja koordinaatteljed
+function createBlenderViewportGrid(size = 70, majorStep = 1.0, subSteps = 5) {
+  const g = new THREE.Group();
+  const half = size / 2;
+  const step = majorStep / subSteps;
+  const minorPts = [];
+  const majorPts = [];
+  const eps = 0.001;
+
+  for (let c = -half; c <= half + eps; c += majorStep) {
+    if (Math.abs(c) < 0.05) continue; // Teljed joonistame eraldi värvilistena
+    majorPts.push(new THREE.Vector3(-half, 0, c), new THREE.Vector3(half, 0, c));
+    majorPts.push(new THREE.Vector3(c, 0, -half), new THREE.Vector3(c, 0, half));
+  }
+
+  for (let c = -half; c <= half + eps; c += step) {
+    if (Math.abs(c % majorStep) < 0.01 || Math.abs(c) < 0.05) continue;
+    minorPts.push(new THREE.Vector3(-half, 0, c), new THREE.Vector3(half, 0, c));
+    minorPts.push(new THREE.Vector3(c, 0, -half), new THREE.Vector3(c, 0, half));
+  }
+
+  const minorGeo = new THREE.BufferGeometry().setFromPoints(minorPts);
+  const minorMat = new THREE.LineBasicMaterial({
+    color: 0x64748b,
+    transparent: true,
+    opacity: 0.22,
+    depthWrite: false,
+  });
+  g.add(new THREE.LineSegments(minorGeo, minorMat));
+
+  const majorGeo = new THREE.BufferGeometry().setFromPoints(majorPts);
+  const majorMat = new THREE.LineBasicMaterial({
+    color: 0x94a3b8,
+    transparent: true,
+    opacity: 0.46,
+    depthWrite: false,
+  });
+  g.add(new THREE.LineSegments(majorGeo, majorMat));
+
+  // Blenderi stiilis X (punane) ja Z (roheline) peatrajektoorid
+  const xPts = [new THREE.Vector3(-half, 0, 0), new THREE.Vector3(half, 0, 0)];
+  const xGeo = new THREE.BufferGeometry().setFromPoints(xPts);
+  const xMat = new THREE.LineBasicMaterial({ color: 0xd93838, depthWrite: false });
+  g.add(new THREE.Line(xGeo, xMat));
+
+  const zPts = [new THREE.Vector3(0, 0, -half), new THREE.Vector3(0, 0, half)];
+  const zGeo = new THREE.BufferGeometry().setFromPoints(zPts);
+  const zMat = new THREE.LineBasicMaterial({ color: 0x22c55e, depthWrite: false });
+  g.add(new THREE.Line(zGeo, zMat));
+
+  g.position.set(0, 0.005, 0);
+  return g;
+}
+
+const gridHelper = createBlenderViewportGrid(70, 1.0, 5);
 layers.grid.add(gridHelper);
 
 // ---- Seinte ja ruumide andmemudel ----
@@ -499,6 +586,18 @@ function getLayerThreeMaterial(matId) {
   return mat;
 }
 
+// Seina viimistlusmaterjal värvipintsli jaoks
+function getWallFinishMaterial(matKey) {
+  if (matKey === 'wood') return MAT.wood;
+  if (matKey === 'dark') return MAT.woodD;
+  if (matKey === 'plaster') return MAT.house;
+  if (matKey === 'brick') return createMaterial(0xb91c1c, { r: 0.85 });
+  if (matKey === 'concrete') return MAT.concrete;
+  if (matKey === 'glass') return MAT.glass;
+  if (MAT[matKey]) return MAT[matKey];
+  return MAT.wood;
+}
+
 // Seina 3D võre taastamine koos konstruktsioonikihtide ja avadega (uksed, aknad)
 function rebuildWallMesh(w) {
   const old = wallMeshes.get(w.id);
@@ -543,12 +642,25 @@ function rebuildWallMesh(w) {
     const cx = w.x1 + Math.cos(angle) * (seg.a + segLen / 2);
     const cz = w.z1 + Math.sin(angle) * (seg.a + segLen / 2);
 
+    // Sokkel (vundamendi lint / sokliosa maapinnast põrandani)
+    if (FLOOR_Y > 0.01) {
+      const socleThick = Math.max(0.20, t + 0.03);
+      const socle = box(segLen, FLOOR_Y, socleThick, MAT.concrete, 0, FLOOR_Y / 2, 0);
+      socle.position.set(cx, FLOOR_Y / 2, cz);
+      socle.rotation.y = -angle;
+      g.add(socle);
+    }
+
     let cumThick = 0;
     const scaleRatio = t / (physics.totalM || t);
-    asm.layers.forEach(l => {
+    const numLayers = asm.layers.length;
+    asm.layers.forEach((l, lIdx) => {
       const layerThick = (l.thickMm / 1000) * scaleRatio;
       if (layerThick < 0.002) return;
-      const lMat = getLayerThreeMaterial(l.matId);
+      let lMat = getLayerThreeMaterial(l.matId);
+      if (w.mat && (lIdx === 0 || lIdx === numLayers - 1 || numLayers === 1)) {
+        lMat = getWallFinishMaterial(w.mat);
+      }
       const localOffset = -t / 2 + cumThick + layerThick / 2;
       cumThick += layerThick;
 
@@ -570,34 +682,104 @@ function rebuildWallMesh(w) {
     const sill = op.type === 'door' ? 0 : (op.sill ?? 0.9);
 
     if (op.type === 'door') {
-      const d = box(0.04, oh - 0.04, op.width - 0.04, MAT.door, 0, FLOOR_Y + oh / 2, 0);
-      d.position.set(ox, FLOOR_Y + oh / 2, oz);
-      d.rotation.y = -angle;
-      g.add(d);
-      // ukselink
-      const handle = box(0.08, 0.03, 0.02, MAT.alu, 0, FLOOR_Y + 1.0, op.width * 0.35);
-      handle.position.set(ox, FLOOR_Y + 1.0, oz);
-      handle.rotation.y = -angle;
-      g.add(handle);
+      // Sokkel ukseava all (maapinnast lävepakuni)
+      if (FLOOR_Y > 0.01) {
+        const socleThick = Math.max(0.20, t + 0.03);
+        const doorSocle = box(op.width, FLOOR_Y, socleThick, MAT.concrete, 0, FLOOR_Y / 2, 0);
+        doorSocle.position.set(ox, FLOOR_Y / 2, oz);
+        doorSocle.rotation.y = -angle;
+        g.add(doorSocle);
+      }
+
+      const doorGroup = new THREE.Group();
+      doorGroup.position.set(ox, FLOOR_Y, oz);
+      doorGroup.rotation.y = -angle;
+
+      const jambThick = 0.045;
+      const frameDepth = Math.max(0.08, Math.min(0.18, t));
+
+      // Lengid (vasak, parem, ülemine)
+      const leftJamb = box(jambThick, oh, frameDepth, MAT.door, -op.width / 2 + jambThick / 2, oh / 2, 0);
+      const rightJamb = box(jambThick, oh, frameDepth, MAT.door, op.width / 2 - jambThick / 2, oh / 2, 0);
+      const topJamb = box(op.width, jambThick, frameDepth, MAT.door, 0, oh - jambThick / 2, 0);
+      const threshold = box(op.width, 0.025, frameDepth + 0.02, MAT.alu, 0, 0.0125, 0);
+      doorGroup.add(leftJamb, rightJamb, topJamb, threshold);
+
+      // Ukseleht (lamab seina tasapinnas: laius X, kõrgus Y, paksus Z)
+      const leafW = op.width - jambThick * 2 + 0.01;
+      const leafH = oh - jambThick - 0.025;
+      const leafThick = 0.048;
+      const doorLeaf = box(leafW, leafH, leafThick, MAT.door, 0, 0.025 + leafH / 2, 0);
+      doorGroup.add(doorLeaf);
+
+      // Terrassi-/klaasuks (kui laius >= 1.2m või 'glass' tüüp)
+      if (op.width >= 1.2 || op.id?.includes('glass')) {
+        const glassW = leafW - 0.22;
+        const glassH = leafH - 0.32;
+        const glassPane = box(glassW, glassH, 0.016, MAT.glass, 0, 0.025 + leafH / 2 + 0.04, 0);
+        doorGroup.add(glassPane);
+      }
+
+      // Ukselink ja rosett mõlemal pool
+      const handleX = op.width / 2 - jambThick - 0.12;
+      const handleY = 1.05;
+      const rosette = box(0.045, 0.08, leafThick + 0.015, MAT.alu, handleX, handleY, 0);
+      doorGroup.add(rosette);
+      [-1, 1].forEach(side => {
+        const stem = box(0.02, 0.02, 0.045, MAT.alu, handleX, handleY, side * (leafThick / 2 + 0.022));
+        const lever = box(0.12, 0.022, 0.02, MAT.alu, handleX - 0.05, handleY, side * (leafThick / 2 + 0.045));
+        doorGroup.add(stem, lever);
+      });
+
+      g.add(doorGroup);
     } else {
-      const fr = box(0.04, oh, op.width, MAT.alu, 0, FLOOR_Y + sill + oh / 2, 0);
-      fr.position.set(ox, FLOOR_Y + sill + oh / 2, oz);
-      fr.rotation.y = -angle;
-      g.add(fr);
-      const gl = box(0.02, oh - 0.08, op.width - 0.08, MAT.glass, 0, FLOOR_Y + sill + oh / 2, 0);
-      gl.position.set(ox, FLOOR_Y + sill + oh / 2, oz);
-      gl.rotation.y = -angle;
-      g.add(gl);
+      const winGroup = new THREE.Group();
+      winGroup.position.set(ox, FLOOR_Y + sill, oz);
+      winGroup.rotation.y = -angle;
+
+      const frameThick = 0.06;
+      const frameDepth = Math.max(0.08, Math.min(0.16, t * 0.75));
+
+      // Aknaraam (vasak, parem, ülaosa, alaosa)
+      const leftFrame = box(frameThick, oh, frameDepth, MAT.alu, -op.width / 2 + frameThick / 2, oh / 2, 0);
+      const rightFrame = box(frameThick, oh, frameDepth, MAT.alu, op.width / 2 - frameThick / 2, oh / 2, 0);
+      const topFrame = box(op.width, frameThick, frameDepth, MAT.alu, 0, oh - frameThick / 2, 0);
+      const btmFrame = box(op.width, frameThick, frameDepth, MAT.alu, 0, frameThick / 2, 0);
+      winGroup.add(leftFrame, rightFrame, topFrame, btmFrame);
+
+      // Klaaspakett
+      const glassW = op.width - frameThick * 2;
+      const glassH = oh - frameThick * 2;
+      const glass = box(glassW, glassH, 0.02, MAT.glass, 0, oh / 2, 0);
+      winGroup.add(glass);
+
+      // Jaotuspost laiadele akendele
+      if (op.width >= 1.5) {
+        const mullion = box(frameThick * 0.75, glassH, frameDepth * 0.9, MAT.alu, 0, oh / 2, 0);
+        winGroup.add(mullion);
+      }
+
+      // Aknalaud ja veeplekk
+      const sillBoard = box(op.width + 0.06, 0.025, 0.12, MAT.wood, 0, 0.0125, -t / 2 - 0.03);
+      const dripFlashing = box(op.width + 0.06, 0.018, 0.10, MAT.alu, 0, -0.01, t / 2 + 0.03);
+      dripFlashing.rotation.x = 0.1;
+      winGroup.add(sillBoard, dripFlashing);
+
+      g.add(winGroup);
     }
 
     // Seinaosa akna sillusel (akna all)
     if (sill > 0.04) {
       let cumBottomThick = 0;
       const scaleRatio = t / (physics.totalM || t);
-      asm.layers.forEach(l => {
+      const numLayers = asm.layers.length;
+      asm.layers.forEach((l, lIdx) => {
         const layerThick = (l.thickMm / 1000) * scaleRatio;
         if (layerThick < 0.002) return;
-        const lMat = getLayerThreeMaterial(l.matId);
+        let lMat = getLayerThreeMaterial(l.matId);
+        if (w.mat && (lIdx === 0 || lIdx === numLayers - 1 || numLayers === 1)) {
+          lMat = getWallFinishMaterial(w.mat);
+        }
         const localOffset = -t / 2 + cumBottomThick + layerThick / 2;
         cumBottomThick += layerThick;
 
@@ -616,10 +798,14 @@ function rebuildWallMesh(w) {
     if (topH > 0.04) {
       let cumTopThick = 0;
       const scaleRatio = t / (physics.totalM || t);
-      asm.layers.forEach(l => {
+      const numLayers = asm.layers.length;
+      asm.layers.forEach((l, lIdx) => {
         const layerThick = (l.thickMm / 1000) * scaleRatio;
         if (layerThick < 0.002) return;
-        const lMat = getLayerThreeMaterial(l.matId);
+        let lMat = getLayerThreeMaterial(l.matId);
+        if (w.mat && (lIdx === 0 || lIdx === numLayers - 1 || numLayers === 1)) {
+          lMat = getWallFinishMaterial(w.mat);
+        }
         const localOffset = -t / 2 + cumTopThick + layerThick / 2;
         cumTopThick += layerThick;
 
@@ -670,163 +856,226 @@ function rebuildRoof() {
     maxH = Math.max(maxH, w.h || H);
   });
 
-  const oh = roofConfig.overhang || 0.45;
-  const bW = (maxX - minX) + oh * 2;
-  const bD = (maxZ - minZ) + oh * 2;
+  const bW = maxX - minX;
+  const bD = maxZ - minZ;
+  if (bW < 0.5 || bD < 0.5) return;
+
   const midX = (minX + maxX) / 2;
   const midZ = (minZ + maxZ) / 2;
   const baseY = FLOOR_Y + maxH;
 
+  const oh = Math.max(0.25, Math.min(1.2, roofConfig.overhang ?? 0.45));
+  const pitchDeg = Math.max(5, Math.min(60, roofConfig.pitch ?? 24));
+  const pitchRad = (pitchDeg * Math.PI) / 180;
+
   const matColorCode = MATERIALS[roofConfig.material]?.color ?? 0x2e353d;
-  const roofMat = M(matColorCode, { r: 0.42, m: 0.35 });
+  const isRed = roofConfig.material === 'roof_red';
+  const roofTex = getRoofTileTexture(isRed);
+  const roofMat = M(matColorCode, { r: 0.42, m: 0.35, map: roofTex });
   const trimMat = M(0x1a1e22, { r: 0.38, m: 0.25 });
-  const ceilingMat = M(0xede8df, { r: 0.85 });
+  const soffitMat = M(0xede8df, { r: 0.85 });
   const wallMatKey = walls[0]?.mat || 'wood';
   const wallMatCode = MATERIALS[wallMatKey]?.color ?? 0xc99a6a;
-  const gableWallMat = M(wallMatCode, { r: 0.68 });
+  const gableWallMat = M(wallMatCode, { r: 0.68, map: getWoodPlankTexture(false) });
 
-  // 1. Laeplaat hoone kohale (veidi sissepoole nihutatud, et vältida Z-fightingut seina ülaservaga)
-  const ceiling = box((maxX - minX) - 0.04, 0.04, (maxZ - minZ) - 0.04, ceilingMat, midX, baseY - 0.02, midZ);
+  // 1. Laepaneel hoone perimeetri kohal
+  const ceiling = box(bW, 0.03, bD, soffitMat, midX, baseY - 0.015, midZ);
   ceiling.receiveShadow = true;
   roofGroup.add(ceiling);
 
   if (roofConfig.type === 'gable') {
-    // Viilkatus: harjajoon piki pikemat hoone mõõdet
     const alongX = bW >= bD;
-    const span = alongX ? bD : bW;
-    const len = alongX ? bW : bD;
-    const pitchRad = ((roofConfig.pitch || 24) * Math.PI) / 180;
-    const peakH = (span / 2) * Math.tan(pitchRad);
-    const slopeLen = (span / 2) / Math.cos(pitchRad);
     const slopeThick = 0.09;
 
     if (alongX) {
-      // Hari piki X (z = midZ, kõrgus baseY + peakH)
-      // Kalle 1 (Lõunapoolne, z < midZ): tõuseb z suunas harjani -> rotX = -pitchRad
-      const slope1 = box(len, slopeThick, slopeLen, roofMat);
+      // Hari piki X telge (z = midZ)
+      const halfSpan = bD / 2;
+      const roofRise = halfSpan * Math.tan(pitchRad);
+      const run = halfSpan + oh;
+      const slopeLen = run / Math.cos(pitchRad);
+      const roofLen = bW + oh * 2;
+
+      // Kalle 1 (Lõunapoolne külg, z < midZ)
+      const s1CenterZ = midZ - run / 2;
+      const s1CenterY = baseY + (roofRise - oh * Math.tan(pitchRad)) / 2 + (slopeThick / 2) / Math.cos(pitchRad);
+      const slope1 = box(roofLen, slopeThick, slopeLen, roofMat);
       slope1.rotation.x = -pitchRad;
-      slope1.position.set(midX, baseY + peakH / 2, midZ - span / 4);
+      slope1.position.set(midX, s1CenterY, s1CenterZ);
       slope1.castShadow = true;
       slope1.receiveShadow = true;
 
-      // Kalle 2 (Põhjapoolne, z > midZ): langeb z suunas räästani -> rotX = +pitchRad
-      const slope2 = box(len, slopeThick, slopeLen, roofMat);
+      // Kalle 2 (Põhjapoolne külg, z > midZ)
+      const s2CenterZ = midZ + run / 2;
+      const s2CenterY = s1CenterY;
+      const slope2 = box(roofLen, slopeThick, slopeLen, roofMat);
       slope2.rotation.x = pitchRad;
-      slope2.position.set(midX, baseY + peakH / 2, midZ + span / 4);
-      slope2.castShadow = true;
-      slope2.receiveShadow = true;
-
-      // Harjaplekk / Harjakivi
-      const ridge = box(len + 0.08, 0.08, 0.22, trimMat, midX, baseY + peakH + 0.03, midZ);
-      ridge.castShadow = true;
-
-      // Räästalauad / Tuulekastid (fascia boards) räästastel
-      const fascia1 = box(len + 0.04, 0.14, 0.035, trimMat, midX, baseY + 0.02, midZ - span / 2);
-      const fascia2 = box(len + 0.04, 0.14, 0.035, trimMat, midX, baseY + 0.02, midZ + span / 2);
-
-      // Otsaviilud (Gable end wall triangles) - sulgevad hoone otsad arhitektuurselt!
-      const gableSpan = maxZ - minZ;
-      const gablePeakH = (gableSpan / 2) * Math.tan(pitchRad);
-      [minX, maxX].forEach(gx => {
-        const shape = new THREE.Shape();
-        shape.moveTo(-gableSpan / 2, 0);
-        shape.lineTo(gableSpan / 2, 0);
-        shape.lineTo(0, gablePeakH);
-        shape.closePath();
-        const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: false });
-        const gableMesh = new THREE.Mesh(extrudeGeo, gableWallMat);
-        gableMesh.rotation.y = Math.PI / 2;
-        gableMesh.position.set(gx + (gx === minX ? 0.06 : -0.06), baseY, midZ);
-        gableMesh.castShadow = true;
-        gableMesh.receiveShadow = true;
-        roofGroup.add(gableMesh);
-      });
-
-      roofGroup.add(slope1, slope2, ridge, fascia1, fascia2);
-    } else {
-      // Hari piki Z (x = midX, kõrgus baseY + peakH)
-      // Kalle 1 (Läänepoolne, x < midX): tõuseb x suunas harjani -> rotZ = +pitchRad
-      const slope1 = box(slopeLen, slopeThick, len, roofMat);
-      slope1.rotation.z = pitchRad;
-      slope1.position.set(midX - span / 4, baseY + peakH / 2, midZ);
-      slope1.castShadow = true;
-      slope1.receiveShadow = true;
-
-      // Kalle 2 (Idapoolne, x > midX): langeb x suunas räästani -> rotZ = -pitchRad
-      const slope2 = box(slopeLen, slopeThick, len, roofMat);
-      slope2.rotation.z = -pitchRad;
-      slope2.position.set(midX + span / 4, baseY + peakH / 2, midZ);
+      slope2.position.set(midX, s2CenterY, s2CenterZ);
       slope2.castShadow = true;
       slope2.receiveShadow = true;
 
       // Harjaplekk
-      const ridge = box(0.22, 0.08, len + 0.08, trimMat, midX, baseY + peakH + 0.03, midZ);
+      const ridgeY = baseY + roofRise + slopeThick / Math.cos(pitchRad) + 0.03;
+      const ridge = box(roofLen + 0.06, 0.07, 0.24, trimMat, midX, ridgeY, midZ);
       ridge.castShadow = true;
 
-      // Räästalauad
-      const fascia1 = box(0.035, 0.14, len + 0.04, trimMat, midX - span / 2, baseY + 0.02, midZ);
-      const fascia2 = box(0.035, 0.14, len + 0.04, trimMat, midX + span / 2, baseY + 0.02, midZ);
+      // Räästalauad ja tuulekastid (fascia & soffit)
+      const eaveDrop = oh * Math.tan(pitchRad);
+      const fasciaH = eaveDrop + 0.14;
+      const fasciaY = baseY - eaveDrop / 2 + 0.04;
+      const fascia1 = box(roofLen + 0.02, fasciaH, 0.035, trimMat, midX, fasciaY, minZ - oh);
+      const fascia2 = box(roofLen + 0.02, fasciaH, 0.035, trimMat, midX, fasciaY, maxZ + oh);
 
-      // Otsaviilud Z otstes
-      const gableSpan = maxX - minX;
-      const gablePeakH = (gableSpan / 2) * Math.tan(pitchRad);
-      [minZ, maxZ].forEach(gz => {
+      const soffit1 = box(roofLen, 0.025, oh, soffitMat, midX, baseY - 0.0125, minZ - oh / 2);
+      const soffit2 = box(roofLen, 0.025, oh, soffitMat, midX, baseY - 0.0125, maxZ + oh / 2);
+
+      // Otsaviilude seinad (Gable triangle walls minX ja maxX otstes)
+      const gableThickness = 0.20;
+      [minX, maxX].forEach(gx => {
         const shape = new THREE.Shape();
-        shape.moveTo(-gableSpan / 2, 0);
-        shape.lineTo(gableSpan / 2, 0);
-        shape.lineTo(0, gablePeakH);
+        shape.moveTo(-bD / 2, 0);
+        shape.lineTo(bD / 2, 0);
+        shape.lineTo(0, roofRise);
         shape.closePath();
-        const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: false });
+
+        const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: gableThickness, bevelEnabled: false });
         const gableMesh = new THREE.Mesh(extrudeGeo, gableWallMat);
-        gableMesh.position.set(midX, baseY, gz + (gz === minZ ? 0.06 : -0.06));
+        gableMesh.rotation.y = Math.PI / 2;
+        const posX = (gx === minX) ? (minX + gableThickness) : maxX;
+        gableMesh.position.set(posX, baseY, midZ);
         gableMesh.castShadow = true;
         gableMesh.receiveShadow = true;
         roofGroup.add(gableMesh);
+
+        // Viilulauad kalletel
+        const rakeLen = (bD / 2 + oh) / Math.cos(pitchRad);
+        const rake1 = box(0.04, 0.14, rakeLen, trimMat);
+        rake1.rotation.x = -pitchRad;
+        const rakeX = (gx === minX) ? (minX - oh + 0.02) : (maxX + oh - 0.02);
+        rake1.position.set(rakeX, s1CenterY, s1CenterZ);
+        const rake2 = box(0.04, 0.14, rakeLen, trimMat);
+        rake2.rotation.x = pitchRad;
+        rake2.position.set(rakeX, s2CenterY, s2CenterZ);
+        roofGroup.add(rake1, rake2);
       });
 
-      roofGroup.add(slope1, slope2, ridge, fascia1, fascia2);
+      roofGroup.add(slope1, slope2, ridge, fascia1, fascia2, soffit1, soffit2);
+    } else {
+      // Hari piki Z telge (x = midX)
+      const halfSpan = bW / 2;
+      const roofRise = halfSpan * Math.tan(pitchRad);
+      const run = halfSpan + oh;
+      const slopeLen = run / Math.cos(pitchRad);
+      const roofLen = bD + oh * 2;
+
+      // Kalle 1 (Läänepoolne, x < midX)
+      const s1CenterX = midX - run / 2;
+      const s1CenterY = baseY + (roofRise - oh * Math.tan(pitchRad)) / 2 + (slopeThick / 2) / Math.cos(pitchRad);
+      const slope1 = box(slopeLen, slopeThick, roofLen, roofMat);
+      slope1.rotation.z = pitchRad;
+      slope1.position.set(s1CenterX, s1CenterY, midZ);
+      slope1.castShadow = true;
+      slope1.receiveShadow = true;
+
+      // Kalle 2 (Idapoolne, x > midX)
+      const s2CenterX = midX + run / 2;
+      const s2CenterY = s1CenterY;
+      const slope2 = box(slopeLen, slopeThick, roofLen, roofMat);
+      slope2.rotation.z = -pitchRad;
+      slope2.position.set(s2CenterX, s2CenterY, midZ);
+      slope2.castShadow = true;
+      slope2.receiveShadow = true;
+
+      const ridgeY = baseY + roofRise + slopeThick / Math.cos(pitchRad) + 0.03;
+      const ridge = box(0.24, 0.07, roofLen + 0.06, trimMat, midX, ridgeY, midZ);
+      ridge.castShadow = true;
+
+      const eaveDrop = oh * Math.tan(pitchRad);
+      const fasciaH = eaveDrop + 0.14;
+      const fasciaY = baseY - eaveDrop / 2 + 0.04;
+      const fascia1 = box(0.035, fasciaH, roofLen + 0.02, trimMat, minX - oh, fasciaY, midZ);
+      const fascia2 = box(0.035, fasciaH, roofLen + 0.02, trimMat, maxX + oh, fasciaY, midZ);
+
+      const soffit1 = box(oh, 0.025, roofLen, soffitMat, minX - oh / 2, baseY - 0.0125, midZ);
+      const soffit2 = box(oh, 0.025, roofLen, soffitMat, maxX + oh / 2, baseY - 0.0125, midZ);
+
+      const gableThickness = 0.20;
+      [minZ, maxZ].forEach(gz => {
+        const shape = new THREE.Shape();
+        shape.moveTo(-bW / 2, 0);
+        shape.lineTo(bW / 2, 0);
+        shape.lineTo(0, roofRise);
+        shape.closePath();
+
+        const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: gableThickness, bevelEnabled: false });
+        const gableMesh = new THREE.Mesh(extrudeGeo, gableWallMat);
+        const posZ = (gz === minZ) ? (minZ + gableThickness) : maxZ;
+        gableMesh.position.set(midX, baseY, posZ);
+        gableMesh.castShadow = true;
+        gableMesh.receiveShadow = true;
+        roofGroup.add(gableMesh);
+
+        const rakeLen = (bW / 2 + oh) / Math.cos(pitchRad);
+        const rake1 = box(rakeLen, 0.14, 0.04, trimMat);
+        rake1.rotation.z = pitchRad;
+        const rakeZ = (gz === minZ) ? (minZ - oh + 0.02) : (maxZ + oh - 0.02);
+        rake1.position.set(s1CenterX, s1CenterY, rakeZ);
+        const rake2 = box(rakeLen, 0.14, 0.04, trimMat);
+        rake2.rotation.z = -pitchRad;
+        rake2.position.set(s2CenterX, s2CenterY, rakeZ);
+        roofGroup.add(rake1, rake2);
+      });
+
+      roofGroup.add(slope1, slope2, ridge, fascia1, fascia2, soffit1, soffit2);
     }
   } else if (roofConfig.type === 'shed') {
     // Ühepoolne katus
-    const pitchRad = ((roofConfig.pitch || 14) * Math.PI) / 180;
-    const slopeLen = bD / Math.cos(pitchRad);
+    const slopeThick = 0.09;
+    const run = bD + oh * 2;
+    const slopeLen = run / Math.cos(pitchRad);
     const riseH = bD * Math.tan(pitchRad);
-    const slope = box(bW, 0.09, slopeLen, roofMat);
+    const roofW = bW + oh * 2;
+
+    const slopeY = baseY + riseH / 2 + (slopeThick / 2) / Math.cos(pitchRad);
+    const slope = box(roofW, slopeThick, slopeLen, roofMat);
     slope.rotation.x = -pitchRad;
-    slope.position.set(midX, baseY + riseH / 2, midZ);
+    slope.position.set(midX, slopeY, midZ);
     slope.castShadow = true;
     slope.receiveShadow = true;
 
-    // Küljekilbid / kiilukujulised viilud külgedel
+    // Küljekiilud
+    const gableThickness = 0.20;
     [minX, maxX].forEach(gx => {
       const shape = new THREE.Shape();
-      const sD = maxZ - minZ;
-      shape.moveTo(-sD / 2, 0);
-      shape.lineTo(sD / 2, 0);
-      shape.lineTo(sD / 2, sD * Math.tan(pitchRad));
+      shape.moveTo(-bD / 2, 0);
+      shape.lineTo(bD / 2, 0);
+      shape.lineTo(bD / 2, riseH);
       shape.closePath();
-      const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: false });
+
+      const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: gableThickness, bevelEnabled: false });
       const wedgeMesh = new THREE.Mesh(extrudeGeo, gableWallMat);
       wedgeMesh.rotation.y = Math.PI / 2;
-      wedgeMesh.position.set(gx - 0.06, baseY, midZ);
+      const posX = (gx === minX) ? (minX + gableThickness) : gx;
+      wedgeMesh.position.set(posX, baseY, midZ);
       wedgeMesh.castShadow = true;
       wedgeMesh.receiveShadow = true;
       roofGroup.add(wedgeMesh);
     });
 
-    const fasciaBack = box(bW + 0.04, 0.16, 0.04, trimMat, midX, baseY + riseH, maxZ + oh);
-    const fasciaFront = box(bW + 0.04, 0.16, 0.04, trimMat, midX, baseY, minZ - oh);
+    const fasciaBack = box(roofW + 0.02, 0.18, 0.04, trimMat, midX, baseY + riseH + 0.05, maxZ + oh);
+    const fasciaFront = box(roofW + 0.02, 0.18, 0.04, trimMat, midX, baseY - oh * Math.tan(pitchRad) + 0.05, minZ - oh);
     roofGroup.add(slope, fasciaBack, fasciaFront);
   } else if (roofConfig.type === 'flat') {
     // Lamekatus koos parapeti ja veeplekiga
-    const flat = box(bW, 0.16, bD, roofMat, midX, baseY + 0.06, midZ);
+    const flatW = bW + oh * 2;
+    const flatD = bD + oh * 2;
+    const flat = box(flatW, 0.16, flatD, roofMat, midX, baseY + 0.08, midZ);
     flat.castShadow = true;
     flat.receiveShadow = true;
     const pThick = 0.10, pH = 0.26;
-    const p1 = box(bW, pH, pThick, trimMat, midX, baseY + pH / 2, midZ - bD / 2 + pThick / 2);
-    const p2 = box(bW, pH, pThick, trimMat, midX, baseY + pH / 2, midZ + bD / 2 - pThick / 2);
-    const p3 = box(pThick, pH, bD, trimMat, midX - bW / 2 + pThick / 2, baseY + pH / 2, midZ);
-    const p4 = box(pThick, pH, bD, trimMat, midX + bW / 2 - pThick / 2, baseY + pH / 2, midZ);
+    const p1 = box(flatW, pH, pThick, trimMat, midX, baseY + pH / 2 + 0.08, midZ - flatD / 2 + pThick / 2);
+    const p2 = box(flatW, pH, pThick, trimMat, midX, baseY + pH / 2 + 0.08, midZ + flatD / 2 - pThick / 2);
+    const p3 = box(pThick, pH, flatD, trimMat, midX - flatW / 2 + pThick / 2, baseY + pH / 2 + 0.08, midZ);
+    const p4 = box(pThick, pH, flatD, trimMat, midX + flatW / 2 - pThick / 2, baseY + pH / 2 + 0.08, midZ);
     roofGroup.add(flat, p1, p2, p3, p4);
   }
 }
@@ -854,8 +1103,9 @@ function rebuildRooms() {
     floorMat.polygonOffset = true;
     floorMat.polygonOffsetFactor = -1;
     floorMat.polygonOffsetUnits = -1;
-    const sideLen = Math.max(1.2, Math.sqrt(r.area || 10));
-    const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(sideLen, sideLen), floorMat);
+    const rW = r.w || Math.max(1.2, Math.sqrt(r.area || 10));
+    const rD = r.d || Math.max(1.2, Math.sqrt(r.area || 10));
+    const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), floorMat);
     floorMesh.rotation.x = -Math.PI / 2;
     floorMesh.position.set(r.x, FLOOR_Y + 0.015, r.z);
     floorMesh.receiveShadow = true;
@@ -863,8 +1113,18 @@ function rebuildRooms() {
     floorMesh.userData.roomId = r.id;
     layers.building.add(floorMesh);
 
+    // Vundamendi täitev alusplaat (täidab vahe maapinna ja põranda vahel)
+    if (FLOOR_Y > 0.01) {
+      const slabSub = box(rW, FLOOR_Y, rD, MAT.concrete, 0, FLOOR_Y / 2, 0);
+      slabSub.position.set(r.x, FLOOR_Y / 2, r.z);
+      slabSub.userData.roomFloor = true;
+      slabSub.userData.roomId = r.id;
+      layers.building.add(slabSub);
+    }
+
     // 1b. Hubane soe sisevalgustus ruumile (Blender-sarnane pehme interjöörisära)
-    const roomLight = new THREE.PointLight(0xffebd2, 0.45, Math.max(4.5, sideLen * 1.4), 2);
+    const lightRadius = Math.max(4.5, Math.max(rW, rD) * 1.4);
+    const roomLight = new THREE.PointLight(0xffebd2, 0.45, lightRadius, 2);
     roomLight.position.set(r.x, FLOOR_Y + 2.1, r.z);
     indoorLightsGroup.add(roomLight);
 
@@ -877,7 +1137,7 @@ function rebuildRooms() {
         const lThick = fl.thickMm / 1000;
         if (lThick < 0.005) return;
         const flMat = getLayerThreeMaterial(fl.matId);
-        const subMesh = box(sideLen - 0.02, lThick, sideLen - 0.02, flMat, 0, 0, 0);
+        const subMesh = box(rW - 0.02, lThick, rD - 0.02, flMat, 0, 0, 0);
         subMesh.position.set(r.x, FLOOR_Y + 0.015 - depthCursor - lThick / 2, r.z);
         subMesh.userData.roomFloor = true;
         subMesh.userData.roomId = r.id;
@@ -1228,11 +1488,38 @@ function layerFor(kind) {
   return layers.furniture;
 }
 
+// Täpne kõrgusarvutus maapinna, terrasside ja hoone põrandate suhtes
+function getPlacementY(type, x, z, kind) {
+  // 1. Kontrolli, kas asub terrassimooduli kohal
+  for (const child of layers.scenery.children) {
+    if (child.userData?.type === 'deckModule' && child.position) {
+      const dx = Math.abs(x - child.position.x);
+      const dz = Math.abs(z - child.position.z);
+      if (dx <= 1.85 && dz <= 1.85) {
+        if (type === 'deckModule' || type === 'lawnArea' || type === 'stonePath') return 0;
+        return 0.12; // Terrassilaudise pealispind
+      }
+    }
+  }
+
+  // 2. Väliobjektid ja haljastus lähevad alati maapinnale y = 0
+  if (kind === 'scenery' || type === 'deckModule' || type === 'pond' || type === 'stonePath' ||
+      type === 'pine' || type === 'birch' || type === 'appleTree' || type === 'bushLilac' ||
+      type === 'hedgeThuja' || type === 'lawnArea' || type === 'gardenLight' || type === 'bbqGrill' ||
+      type === 'greenhouse' || type === 'raisedBed' || type === 'hotTub' || type === 'carModern' ||
+      type === 'carTrailer' || type === 'saunaPad' || type === 'solarPanel') {
+    return 0;
+  }
+
+  // 3. Siseruumide ja mööbli paigutus hoone põrandapinnale
+  return FLOOR_Y;
+}
+
 function addAsset(type, x, z, ry = 0, s = 1) {
   const fn = ASSETS[type];
   if (!fn) return null;
   const o = fn();
-  const y = o.userData.kind === 'scenery' ? 0 : FLOOR_Y;
+  const y = getPlacementY(type, x, z, o.userData.kind);
   o.position.set(x, y, z);
   o.rotation.y = ry;
   o.scale.setScalar(s);
@@ -1364,22 +1651,22 @@ function placeSaunaTemplate() {
   walls[1].openings.push({ type: 'window', along: W * 0.5, width: 0.6, height: 0.6, sill: 1.4 });
 
   rooms = [
-    { id: uid(), name: 'Puhkeruum (11,0 m²)', x: FRONT_D / 2, z: W / 2, area: 11.0, floorMat: 'parquet' },
-    { id: uid(), name: 'Pesu (2,5 m²)', x: FRONT_D + BACK_D / 2, z: PESU_W / 2, area: 2.5, floorMat: 'tile_gray' },
-    { id: uid(), name: 'Leil (5,8 m²)', x: FRONT_D + BACK_D / 2, z: PESU_W + LEILI_W / 2, area: 5.8, floorMat: 'wood' },
+    { id: uid(), name: 'Puhkeruum (11,0 m²)', x: FRONT_D / 2, z: W / 2, w: FRONT_D, d: W, area: 11.0, floorMat: 'parquet' },
+    { id: uid(), name: 'Pesu (2,5 m²)', x: FRONT_D + BACK_D / 2, z: PESU_W / 2, w: BACK_D, d: PESU_W, area: 2.5, floorMat: 'tile_gray' },
+    { id: uid(), name: 'Leil (5,8 m²)', x: FRONT_D + BACK_D / 2, z: PESU_W + LEILI_W / 2, w: BACK_D, d: LEILI_W, area: 5.8, floorMat: 'wood' },
   ];
 
   rebuildAllWalls();
 
   // Haljastus & aed sauna ümber
   addAsset('deckModule', L / 2, W + 1.8);
+  addAsset('outdoorTable', L / 2, W + 1.8);
   addAsset('hotTub', L + 2.8, W + 2.2);
   addAsset('pond', L + 4.5, -3.5);
   addAsset('pine', -4, W + 4, 0, 1.6);
   addAsset('pine', L + 3, W + 7, 0, 1.8);
   addAsset('birch', -6, -2, 0, 1.3);
   addAsset('stonePath', L / 2, W + 3.8);
-  addAsset('outdoorTable', L / 2, W + 1.8);
   addAsset('gardenLight', L + 1.2, W + 3.4);
   addAsset('gardenLight', -1.2, W + 1.2);
   addAsset('sofa', 1.4, 1.0);
@@ -1433,16 +1720,17 @@ function placeHouseTemplate() {
   walls[3].openings.push({ type: 'window', along: 2.2, width: 1.4, height: 1.4, sill: 0.85 });
 
   rooms = [
-    { id: uid(), name: 'Elutuba ja köök (24,0 m²)', x: 3.0, z: 2.0, area: 24.0, floorMat: 'parquet' },
-    { id: uid(), name: 'Söögituba & terrassipääs (22,0 m²)', x: 3.0, z: 6.2, area: 22.0, floorMat: 'parquet' },
-    { id: uid(), name: 'Magamistuba (21,5 m²)', x: 8.5, z: 2.2, area: 21.5, floorMat: 'parquet' },
-    { id: uid(), name: 'Vannituba & Spa (19,0 m²)', x: 8.5, z: 6.5, area: 19.0, floorMat: 'tile_gray' },
+    { id: uid(), name: 'Elutuba ja köök (24,0 m²)', x: 3.0, z: 2.0, w: 6.0, d: 4.0, area: 24.0, floorMat: 'parquet' },
+    { id: uid(), name: 'Söögituba & terrassipääs (22,0 m²)', x: 3.0, z: 6.25, w: 6.0, d: 4.5, area: 22.0, floorMat: 'parquet' },
+    { id: uid(), name: 'Magamistuba (21,5 m²)', x: 8.5, z: 2.25, w: 5.0, d: 4.5, area: 21.5, floorMat: 'parquet' },
+    { id: uid(), name: 'Vannituba & Spa (19,0 m²)', x: 8.5, z: 6.5, w: 5.0, d: 4.0, area: 19.0, floorMat: 'tile_gray' },
   ];
 
   rebuildAllWalls();
 
   // Krunt & aed pereelamu ümber
   addAsset('deckModule', 3.5, houseW + 1.8);
+  addAsset('outdoorTable', 3.5, houseW + 1.8);
   addAsset('pergola', 3.5, houseW + 1.8);
   addAsset('greenhouse', 14.5, 4.0);
   addAsset('raisedBed', 14.5, 0.5);
@@ -1452,7 +1740,6 @@ function placeHouseTemplate() {
   addAsset('bushLilac', -3.0, -2.5);
   addAsset('hedgeThuja', 8.5, -3.0);
   addAsset('hedgeThuja', 10.5, -3.0);
-  addAsset('outdoorTable', 3.5, houseW + 1.8);
   addAsset('bbqGrill', 1.0, houseW + 1.5);
   addAsset('sofa', 3.0, 1.8);
   addAsset('kitchenUnit', 1.5, 6.0);
@@ -1473,15 +1760,15 @@ function placeGardenShedTemplate() {
   clearEditable();
   addAsset('shed', 0, 0);
   addAsset('greenhouse', 5.0, 0);
-  addAsset('pergola', 0, 4.5);
   addAsset('deckModule', 0, 4.5);
+  addAsset('pergola', 0, 4.5);
+  addAsset('outdoorTable', 0, 4.5);
   addAsset('raisedBed', 4.5, 3.5);
   addAsset('raisedBed', 4.5, 5.0);
   addAsset('flowerBed', 2.5, 2.5);
   addAsset('fenceWood', -2.5, -2.5);
   addAsset('fenceWood', 1.5, -2.5);
   addAsset('appleTree', -4.0, 4.0);
-  addAsset('outdoorTable', 0, 4.5);
   addAsset('bbqGrill', -1.5, 4.5);
 
   pushHist('Mall: Aiamaja, kasvuhoone ja terrass');
@@ -1600,6 +1887,12 @@ function select(o) {
     if (o.userData.kind === 'wall') showWallHandles(o.userData.wallId);
     else hideWallHandles();
   }
+  if (o.userData.kind !== 'room') {
+    selectionBoxHelper.setFromObject(o);
+    selectionBoxHelper.visible = true;
+  } else {
+    selectionBoxHelper.visible = false;
+  }
   document.getElementById('btn-del').disabled = false;
   document.getElementById('props-empty').classList.add('hidden');
   document.getElementById('props-form').classList.remove('hidden');
@@ -1613,13 +1906,16 @@ function select(o) {
   document.getElementById('props-furniture-finish')?.classList.toggle('hidden', !isFurniture);
   syncProps();
   refreshList();
-  setStatus((o.userData.type || 'objekt') + ' valitud');
+  updateClearanceDimensions(o);
+  setStatus((o.userData.name || o.userData.type || 'objekt') + ' valitud');
 }
 
 function deselect() {
   if (selected) transform.detach();
   hideWallHandles();
+  clearClearanceDimensions();
   selected = null;
+  selectionBoxHelper.visible = false;
   document.getElementById('btn-del').disabled = true;
   document.getElementById('props-empty').classList.remove('hidden');
   document.getElementById('props-form').classList.add('hidden');
@@ -1631,6 +1927,7 @@ function clampSel() {
   selected.position.x = THREE.MathUtils.clamp(selected.position.x, -35, 45);
   selected.position.z = THREE.MathUtils.clamp(selected.position.z, -35, 45);
   selected.position.y = Math.max(0, selected.position.y);
+  if (selectionBoxHelper.visible) selectionBoxHelper.update();
 }
 
 function syncProps() {
@@ -1925,15 +2222,105 @@ function snapSelectedToWall() {
   if (!selected || !selected.userData?.movable) return;
   const changed = alignToWall(selected, walls);
   if (changed) {
+    selected.position.x = changed.x;
+    selected.position.z = changed.z;
+    selected.rotation.y = changed.ry;
     syncProps();
     clampSel();
     pushHist();
     refreshQuote();
     runErgoCheck();
-    setStatus('Objekt joondatud lähima seina äärde');
+    updateClearanceDimensions(selected);
+    setStatus('Objekt joondatud lähima seina äärde (🧲)');
   } else {
     setStatus('Läheduses ei leitud sobivat seina');
   }
+}
+
+let lastAutoSnapTime = 0;
+function checkAutoWallSnap(obj) {
+  if (!obj || !obj.userData?.movable || obj.userData.kind === 'wall' || obj.userData.kind === 'room') return;
+  const now = performance.now();
+  if (now - lastAutoSnapTime < 150) return;
+  const near = findNearestWall(obj.position.x, obj.position.z, walls);
+  if (near && near.dist < 0.42 && near.dist > 0.04) {
+    const aligned = alignToWall(obj, walls);
+    if (aligned && Math.hypot(aligned.x - obj.position.x, aligned.z - obj.position.z) < 0.35) {
+      obj.position.x = aligned.x;
+      obj.position.z = aligned.z;
+      obj.rotation.y = aligned.ry;
+      lastAutoSnapTime = now;
+      setStatus('🧲 Seinamagnet: haakus seina äärde');
+    }
+  }
+}
+
+function clearClearanceDimensions() {
+  while (clearanceDimsGroup.children.length) {
+    clearanceDimsGroup.remove(clearanceDimsGroup.children[0]);
+  }
+}
+
+function updateClearanceDimensions(obj) {
+  clearClearanceDimensions();
+  if (!obj || !obj.userData?.movable || obj.userData.kind === 'wall' || obj.userData.kind === 'room') return;
+  if (!walls || walls.length === 0) return;
+
+  const wallDists = walls.map(w => {
+    const len = wallLength(w);
+    if (len < 0.1) return null;
+    const dx = w.x2 - w.x1, dz = w.z2 - w.z1;
+    let t = ((obj.position.x - w.x1) * dx + (obj.position.z - w.z1) * dz) / (len * len);
+    t = Math.max(0, Math.min(1, t));
+    const px = w.x1 + t * dx, pz = w.z1 + t * dz;
+    const dist = Math.hypot(obj.position.x - px, obj.position.z - pz);
+    return { wall: w, px, pz, dist };
+  }).filter(Boolean).sort((a, b) => a.dist - b.dist);
+
+  const closest = wallDists.slice(0, 2);
+  const y = (obj.position.y || FLOOR_Y) + 0.12;
+
+  closest.forEach((cw, idx) => {
+    if (cw.dist < 0.05 || cw.dist > 6.0) return;
+    const points = [
+      new THREE.Vector3(obj.position.x, y, obj.position.z),
+      new THREE.Vector3(cw.px, y, cw.pz),
+    ];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const lineMat = new THREE.LineDashedMaterial({
+      color: idx === 0 ? 0x2563eb : 0x0891b2,
+      dashSize: 0.12,
+      gapSize: 0.08,
+      depthTest: false,
+    });
+    const line = new THREE.Line(geo, lineMat);
+    line.computeLineDistances();
+    line.renderOrder = 9;
+    clearanceDimsGroup.add(line);
+
+    const c = document.createElement('canvas');
+    c.width = 120;
+    c.height = 36;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = idx === 0 ? 'rgba(37, 99, 235, 0.92)' : 'rgba(8, 145, 178, 0.92)';
+    ctx.beginPath();
+    ctx.roundRect(2, 2, 116, 32, 6);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${cw.dist.toFixed(2)} m`, 60, 18);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+    const mx = (obj.position.x + cw.px) / 2;
+    const mz = (obj.position.z + cw.pz) / 2;
+    sp.position.set(mx, y + 0.16, mz);
+    sp.scale.set(0.95, 0.28, 1);
+    clearanceDimsGroup.add(sp);
+  });
 }
 
 function centerSelectedInRoom() {
@@ -1982,11 +2369,17 @@ function cloneSelected() {
 
 function groundSelected() {
   if (!selected || !selected.userData?.movable) return;
-  selected.position.y = 0;
+  const targetY = getPlacementY(
+    selected.userData?.type,
+    selected.position.x,
+    selected.position.z,
+    selected.userData?.kind
+  );
+  selected.position.y = targetY;
   syncProps();
   clampSel();
   pushHist();
-  setStatus('Elemendi kõrgus viidud pinnale');
+  setStatus(`Elemendi kõrgus viidud aluspinnale (${targetY > 0 ? (targetY === 0.12 ? 'terrassile' : 'põrandale') : 'maapinnale'})`);
 }
 
 function deleteSelected() {
@@ -2072,7 +2465,100 @@ document.getElementById('btn-trace-remove')?.addEventListener('click', () => {
   pushHist();
 });
 
-// Joonistamisrežiimid (Wall, BoxRoom, Room, Door, Window, Measure)
+// Materjalipintsli ja pipeti andmed
+const BRUSH_PALETTES = {
+  floor: [
+    { id: 'parquet', name: 'Tammeparkett', color: '#c49a6c' },
+    { id: 'tile_gray', name: 'Hall plaat', color: '#64748b' },
+    { id: 'concrete', name: 'Lihvitud betoon', color: '#94a3b8' },
+    { id: 'wood', name: 'Männilaud', color: '#d4a373' },
+    { id: 'paver', name: 'Unikivi terrass', color: '#78716c' },
+    { id: 'grass', name: 'Aiamuru', color: '#22c55e' },
+  ],
+  wall: [
+    { id: 'plaster', name: 'Valge krohv', color: '#e2e8f0' },
+    { id: 'wood', name: 'Hele voodrilaud', color: '#d4a373' },
+    { id: 'dark', name: 'Tume termopuit', color: '#334155' },
+    { id: 'brick', name: 'Fassaaditellis', color: '#b91c1c' },
+    { id: 'concrete', name: 'Monoliitbetoon', color: '#64748b' },
+    { id: 'glass', name: 'Klaasfassaad', color: '#38bdf8' },
+  ],
+};
+
+let currentBrushTab = 'floor';
+let currentBrushMat = 'parquet';
+let isEyedropperActive = false;
+
+function setEyedropperActive(active) {
+  isEyedropperActive = active;
+  const btnPipette = document.getElementById('btn-brush-eyedropper');
+  if (btnPipette) btnPipette.classList.toggle('active', isEyedropperActive);
+  if (canvas) canvas.style.cursor = isEyedropperActive ? 'crosshair' : (drawMode === 'paint' ? 'cell' : '');
+  if (isEyedropperActive) {
+    setStatus('🧪 Pipett aktiivne: klõpsa mudelil materjali kopeerimiseks');
+  }
+}
+
+function renderBrushSwatches() {
+  const grid = document.getElementById('brush-swatches-grid');
+  if (!grid) return;
+  const items = BRUSH_PALETTES[currentBrushTab] || BRUSH_PALETTES.floor;
+  grid.innerHTML = items.map(item => `
+    <button type="button" class="brush-swatch-item ${item.id === currentBrushMat ? 'active' : ''}" data-mat="${item.id}" title="${item.name}">
+      <span class="swatch-color" style="background-color: ${item.color};"></span>
+      <span class="swatch-name">${item.name}</span>
+    </button>
+  `).join('');
+
+  grid.querySelectorAll('.brush-swatch-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentBrushMat = btn.dataset.mat;
+      setEyedropperActive(false);
+      renderBrushSwatches();
+      updateBrushLabel();
+      setStatus(`Valitud pintsli materjal: ${btn.title}`);
+    });
+  });
+  updateBrushLabel();
+}
+
+function updateBrushLabel() {
+  const allMats = [...BRUSH_PALETTES.floor, ...BRUSH_PALETTES.wall];
+  const found = allMats.find(m => m.id === currentBrushMat) || { name: currentBrushMat, color: '#c49a6c' };
+  const label = document.getElementById('brush-active-label');
+  const dot = document.getElementById('brush-preview-dot');
+  if (label) label.textContent = found.name;
+  if (dot) dot.style.backgroundColor = found.color;
+}
+
+// Arhitektuurse ristlõike funktsioon (Section Cut / Dollhouse)
+function setSectionCut(height) {
+  const label = document.getElementById('section-cut-val');
+  const slider = document.getElementById('section-cut-slider');
+  const btnSection = document.getElementById('btn-section-cut');
+
+  document.querySelectorAll('.sc-preset-btn').forEach(btn => {
+    btn.classList.toggle('active', Math.abs(Number(btn.dataset.height) - height) < 0.05);
+  });
+
+  if (height <= 0.05) {
+    sectionCutHeight = 0;
+    renderer.clippingPlanes = [];
+    if (label) label.textContent = 'Terve maja';
+    if (btnSection) btnSection.classList.remove('active');
+    setStatus('Lõikepind välja lülitatud (terve maja vaade)');
+  } else {
+    sectionCutHeight = height;
+    sectionCutPlane.constant = FLOOR_Y + height;
+    renderer.clippingPlanes = [sectionCutPlane];
+    if (label) label.textContent = `${height.toFixed(1)} m`;
+    if (slider) slider.value = height;
+    if (btnSection) btnSection.classList.add('active');
+    setStatus(`Arhitektuurne korruslõige aktiivne: ${height.toFixed(1)} m kõrgusel`);
+  }
+}
+
+// Joonistamisrežiimid (Wall, BoxRoom, Room, Door, Window, Measure, Paint)
 let drawMode = null;
 let wallStart = null;
 let boxRoomStart = null;
@@ -2093,7 +2579,19 @@ function setDrawMode(mode) {
   else if (mode === 'door') setDrawHint('Uks: klõpsa seinal avatäite paigaldamiseks.');
   else if (mode === 'window') setDrawHint('Aken: klõpsa seinal akna lisamiseks.');
   else if (mode === 'measure') setDrawHint('Mõõdulint: klõpsa algus- ja lõpp-punkt kauguse mõõtmiseks.');
-  else setDrawHint('');
+  else if (mode === 'paint') {
+    setDrawHint('Pintsel: klõpsa seinal või põrandal viimistluse vahetamiseks. Pipetiga (I) saad kopeerida.');
+    document.getElementById('material-brush-palette')?.classList.remove('hidden');
+    renderBrushSwatches();
+    if (canvas) canvas.style.cursor = isEyedropperActive ? 'crosshair' : 'cell';
+  } else setDrawHint('');
+
+  if (mode !== 'paint') {
+    document.getElementById('material-brush-palette')?.classList.add('hidden');
+    setEyedropperActive(false);
+    if (canvas) canvas.style.cursor = '';
+  }
+
   setStatus(mode ? `Tööriist: ${mode}` : 'Valmis');
 }
 document.querySelectorAll('[data-draw]').forEach(b => {
@@ -2291,6 +2789,98 @@ function onDrawClick(event) {
     setStatus(drawMode === 'door' ? 'Uks lisatud seinale' : 'Aken lisatud seinale');
     return true;
   }
+
+  if (drawMode === 'paint') {
+    const r = canvas.getBoundingClientRect();
+    const rayMouse = new THREE.Vector2(
+      ((event.clientX - r.left) / r.width) * 2 - 1,
+      -((event.clientY - r.top) / r.height) * 2 + 1
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(rayMouse, camera);
+
+    const candidates = [];
+    wallMeshes.forEach(mesh => {
+      mesh.traverse(c => { if (c.isMesh) candidates.push(c); });
+    });
+    layers.building.children.forEach(c => {
+      if (c.userData?.roomFloor && c.isMesh) candidates.push(c);
+    });
+
+    const hits = raycaster.intersectObjects(candidates, false);
+    if (hits.length) {
+      const hitObj = hits[0].object;
+      let root = hitObj;
+      while (root && !root.userData?.wallId && !root.userData?.roomId && root.parent) {
+        root = root.parent;
+      }
+
+      if (root?.userData?.wallId) {
+        const w = walls.find(x => x.id === root.userData.wallId);
+        if (w) {
+          if (isEyedropperActive) {
+            currentBrushMat = w.mat || 'wood';
+            currentBrushTab = 'wall';
+            document.querySelectorAll('.brush-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'wall'));
+            setEyedropperActive(false);
+            renderBrushSwatches();
+            setStatus(`🧪 Pipetiga kopeeritud seina materjal: ${MATERIALS[currentBrushMat]?.name || currentBrushMat}`);
+          } else {
+            w.mat = currentBrushMat;
+            rebuildWallMesh(w);
+            pushHist();
+            refreshQuote();
+            setStatus(`🎨 Seina viimistlus värvitud: ${MATERIALS[currentBrushMat]?.name || currentBrushMat}`);
+          }
+          return true;
+        }
+      }
+
+      const rId = root?.userData?.roomId || hitObj.userData?.roomId;
+      if (rId) {
+        const rm = rooms.find(x => x.id === rId);
+        if (rm) {
+          if (isEyedropperActive) {
+            currentBrushMat = rm.floorMat || 'parquet';
+            currentBrushTab = 'floor';
+            document.querySelectorAll('.brush-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'floor'));
+            setEyedropperActive(false);
+            renderBrushSwatches();
+            setStatus(`🧪 Pipetiga kopeeritud põranda materjal: ${MATERIALS[currentBrushMat]?.name || currentBrushMat}`);
+          } else {
+            rm.floorMat = currentBrushMat;
+            rebuildRooms();
+            pushHist();
+            refreshQuote();
+            setStatus(`🎨 Põranda viimistlus värvitud: ${MATERIALS[currentBrushMat]?.name || currentBrushMat}`);
+          }
+          return true;
+        }
+      }
+    }
+
+    const contRoom = findContainingRoom(rawP.x, rawP.z, rooms);
+    if (contRoom) {
+      if (isEyedropperActive) {
+        currentBrushMat = contRoom.floorMat || 'parquet';
+        currentBrushTab = 'floor';
+        document.querySelectorAll('.brush-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'floor'));
+        setEyedropperActive(false);
+        renderBrushSwatches();
+        setStatus(`🧪 Pipetiga kopeeritud põranda materjal: ${MATERIALS[currentBrushMat]?.name || currentBrushMat}`);
+      } else {
+        contRoom.floorMat = currentBrushMat;
+        rebuildRooms();
+        pushHist();
+        refreshQuote();
+        setStatus(`🎨 Põranda viimistlus värvitud: ${MATERIALS[currentBrushMat]?.name || currentBrushMat}`);
+      }
+      return true;
+    }
+
+    setStatus('Klõpsa seinal või põrandal viimistluse vahetamiseks');
+    return true;
+  }
   return false;
 }
 
@@ -2337,6 +2927,10 @@ canvas.addEventListener('pointermove', e => {
       new THREE.Vector3(start.x, FLOOR_Y + 0.08, start.z),
       new THREE.Vector3(p.x, FLOOR_Y + 0.08, p.z),
     ];
+    if (drawMode === 'measure') {
+      const liveDist = Math.hypot(p.x - start.x, p.z - start.z);
+      setDrawHint(`Mõõdulint: kaugus ${liveDist.toFixed(2)} m (klõpsa teise punkti kinnitamiseks)`);
+    }
   }
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   previewLine = new THREE.Line(geo, new THREE.LineBasicMaterial({
@@ -3482,12 +4076,163 @@ document.getElementById('mode-2d').onclick = () => setViewMode('2d');
 document.getElementById('mode-blueprint')?.addEventListener('click', () => setViewMode('blueprint'));
 document.getElementById('mode-walk')?.addEventListener('click', () => setViewMode('walk'));
 
-document.getElementById('btn-top').onclick = () => setViewMode('2d');
-document.getElementById('btn-iso').onclick = () => {
-  setViewMode('3d');
-  cameraPersp.position.set(-6, 14, 14);
+// Sujuvad kaamera üleminekud ja Blenderi vaaterežiimid
+let cameraTween = null;
+function animateCameraTo(targetEye, targetLookAt, duration = 300, onDone = null) {
+  const startEye = camera.position.clone();
+  const startLook = controls.target.clone();
+  const startTime = performance.now();
+  if (cameraTween) cancelAnimationFrame(cameraTween);
+
+  function stepTween(now) {
+    const progress = Math.min(1, (now - startTime) / duration);
+    const t = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+    camera.position.lerpVectors(startEye, targetEye, t);
+    controls.target.lerpVectors(startLook, targetLookAt, t);
+    controls.update();
+    if (progress < 1) {
+      cameraTween = requestAnimationFrame(stepTween);
+    } else {
+      cameraTween = null;
+      if (onDone) onDone();
+    }
+  }
+  cameraTween = requestAnimationFrame(stepTween);
+}
+
+function setTopView() {
+  if (viewMode === 'walk') setViewMode('3d');
+  const dist = Math.max(16, camera.position.distanceTo(controls.target));
+  const target = controls.target.clone();
+  animateCameraTo(new THREE.Vector3(target.x, target.y + dist, target.z + 0.001), target, 280);
+  setStatus('Pealtvaade (Numpad 7)');
+}
+
+function setFrontView() {
+  if (viewMode === 'walk') setViewMode('3d');
+  const dist = Math.max(16, camera.position.distanceTo(controls.target));
+  const target = controls.target.clone();
+  animateCameraTo(new THREE.Vector3(target.x, target.y + 2.5, target.z + dist), target, 280);
+  setStatus('Eestvaade (Numpad 1)');
+}
+
+function setSideView() {
+  if (viewMode === 'walk') setViewMode('3d');
+  const dist = Math.max(16, camera.position.distanceTo(controls.target));
+  const target = controls.target.clone();
+  animateCameraTo(new THREE.Vector3(target.x + dist, target.y + 2.5, target.z), target, 280);
+  setStatus('Küljeltvaade (Numpad 3)');
+}
+
+function setIsoView() {
+  if (viewMode === 'walk') setViewMode('3d');
+  const target = controls.target.clone();
+  animateCameraTo(new THREE.Vector3(target.x - 12, target.y + 14, target.z + 14), target, 320);
+  setStatus('Isomeetriline vaade');
+}
+
+function toggleOrthoPersp() {
+  if (viewMode === 'walk') return;
+  if (camera === cameraPersp) {
+    camera = cameraOrtho;
+    controls.object = cameraOrtho;
+    cameraOrtho.position.copy(cameraPersp.position);
+    cameraOrtho.rotation.copy(cameraPersp.rotation);
+    cameraOrtho.zoom = 1.0;
+    cameraOrtho.updateProjectionMatrix();
+    document.getElementById('gizmo-persp-toggle')?.classList.add('active');
+    setStatus('Ortograafiline vaade (Numpad 5)');
+  } else {
+    camera = cameraPersp;
+    controls.object = cameraPersp;
+    cameraPersp.position.copy(cameraOrtho.position);
+    cameraPersp.rotation.copy(cameraOrtho.rotation);
+    cameraPersp.updateProjectionMatrix();
+    document.getElementById('gizmo-persp-toggle')?.classList.remove('active');
+    setStatus('Perspektiivvaade (Numpad 5)');
+  }
+  transform.camera = camera;
   controls.update();
-};
+}
+
+function focusSelected() {
+  if (!selected) {
+    const target = new THREE.Vector3(L / 2 + 2, 0.2, W / 2);
+    animateCameraTo(new THREE.Vector3(target.x - 10, target.y + 14, target.z + 14), target, 300);
+    setStatus('Fookus hoone tsentrisse');
+    return;
+  }
+  const box = new THREE.Box3().setFromObject(selected);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z, 1.2);
+  const fov = (camera.fov || 40) * (Math.PI / 180);
+  const dist = Math.max(3.0, (maxDim / (2 * Math.tan(fov / 2))) * 1.5);
+
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  if (dir.lengthSq() < 0.001) dir.set(0, 0.7, 0.7).normalize();
+  const newEye = center.clone().add(dir.multiplyScalar(dist));
+  animateCameraTo(newEye, center, 280);
+  setStatus(`Fookus: ${selected.userData?.name || selected.userData?.type || 'Valitud objekt'}`);
+}
+
+function setShadowsEnabled(enabled) {
+  shadowsEnabled = !!enabled;
+  document.getElementById('btn-shadows')?.classList.toggle('active', shadowsEnabled);
+  if (currentShadingMode === 'rendered') {
+    sun.castShadow = shadowsEnabled;
+    renderer.shadowMap.enabled = shadowsEnabled;
+  }
+  setStatus(shadowsEnabled ? 'Varjud sisse lülitatud' : 'Varjud välja lülitatud (kiire CAD jõudlus)');
+}
+
+function setShadingMode(mode) {
+  currentShadingMode = mode;
+  ['wire', 'solid', 'material', 'rendered'].forEach(m => {
+    document.getElementById(`shading-${m}`)?.classList.toggle('active', m === mode);
+  });
+  const shadingNames = {
+    wire: 'Traat (Wireframe)',
+    solid: 'CAD Savi (Solid Clay)',
+    material: 'Materjal (Material Preview)',
+    rendered: 'Renderdatud & Varjud',
+  };
+  const pill = document.getElementById('cad-shading');
+  if (pill) pill.textContent = mode.toUpperCase();
+
+  if (mode === 'wire') {
+    scene.overrideMaterial = wireMaterial;
+    sun.castShadow = false;
+    renderer.shadowMap.enabled = false;
+  } else if (mode === 'solid') {
+    scene.overrideMaterial = clayMaterial;
+    sun.castShadow = false;
+    renderer.shadowMap.enabled = false;
+  } else if (mode === 'material') {
+    scene.overrideMaterial = null;
+    sun.castShadow = false;
+    renderer.shadowMap.enabled = false;
+  } else if (mode === 'rendered') {
+    scene.overrideMaterial = null;
+    sun.castShadow = shadowsEnabled;
+    renderer.shadowMap.enabled = shadowsEnabled;
+  }
+  setStatus(`Vaaterežiim: ${shadingNames[mode] || mode}`);
+}
+
+document.getElementById('btn-top')?.addEventListener('click', setTopView);
+document.getElementById('btn-front')?.addEventListener('click', setFrontView);
+document.getElementById('btn-side')?.addEventListener('click', setSideView);
+document.getElementById('btn-iso')?.addEventListener('click', setIsoView);
+document.getElementById('btn-focus-selected')?.addEventListener('click', focusSelected);
+document.getElementById('gizmo-focus-btn')?.addEventListener('click', focusSelected);
+document.getElementById('gizmo-persp-toggle')?.addEventListener('click', toggleOrthoPersp);
+document.getElementById('btn-shadows')?.addEventListener('click', () => setShadowsEnabled(!shadowsEnabled));
+
+['wire', 'solid', 'material', 'rendered'].forEach(m => {
+  document.getElementById(`shading-${m}`)?.addEventListener('click', () => setShadingMode(m));
+});
+
 document.getElementById('btn-reset-view').onclick = () => setViewMode(viewMode);
 
 function zoomView(factor) {
@@ -3612,6 +4357,8 @@ document.querySelectorAll('[data-layer]').forEach(cb => {
 // Ruudustiku snap sammu valik
 document.getElementById('snap-grid-select')?.addEventListener('change', e => {
   gridSnapStep = parseFloat(e.target.value) || 0.5;
+  const snapPill = document.getElementById('cad-snap');
+  if (snapPill) snapPill.textContent = `Snap: ${gridSnapStep.toFixed(2)} m`;
   setStatus(`Ruudustiku snap: ${gridSnapStep} m`);
 });
 
@@ -3702,6 +4449,13 @@ canvas.addEventListener('pointermove', e => {
     walkYaw -= dx * 0.005;
     walkPitch = THREE.MathUtils.clamp(walkPitch - dy * 0.005, -Math.PI * 0.35, Math.PI * 0.35);
   }
+
+  // CAD reaalajas koordinaatide näit maapinnal
+  const groundPt = groundPoint(e);
+  if (groundPt) {
+    const coordsEl = document.getElementById('cad-coords');
+    if (coordsEl) coordsEl.textContent = `X: ${groundPt.x.toFixed(2)} m · Z: ${groundPt.z.toFixed(2)} m`;
+  }
 });
 
 window.addEventListener('pointerup', () => {
@@ -3746,27 +4500,76 @@ canvas.addEventListener('drop', e => {
   }
 });
 
-// Klaviatuuri kiirklahvid
+// Klaviatuuri kiirklahvid (Blender & CAD)
 window.addEventListener('keydown', e => {
   if (e.target.matches('input,textarea,select')) return;
   const k = e.key.toLowerCase();
+  const code = e.code;
+
   if (['w', 'a', 's', 'd'].includes(k) && isWalking) {
     walkKeys[k] = true;
     return;
   }
+
+  // Blender Numpad & vaateklahvid
+  if (code === 'Numpad7' || (k === '7' && !e.ctrlKey && !e.altKey)) { e.preventDefault(); setTopView(); return; }
+  if (code === 'Numpad1' || (k === '1' && !e.ctrlKey && !e.altKey)) { e.preventDefault(); setFrontView(); return; }
+  if (code === 'Numpad3' || (k === '3' && !e.ctrlKey && !e.altKey)) { e.preventDefault(); setSideView(); return; }
+  if (code === 'Numpad5' || (k === '5' && !e.ctrlKey && !e.altKey)) { e.preventDefault(); toggleOrthoPersp(); return; }
+  if (code === 'NumpadDecimal' || k === '.' || k === 'f') { e.preventDefault(); focusSelected(); return; }
+
+  // Blender Shading režiimide tsükkel (Z klahv)
+  if (k === 'z' && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    const modes = ['material', 'solid', 'wire', 'rendered'];
+    const nextIdx = (modes.indexOf(currentShadingMode) + 1) % modes.length;
+    setShadingMode(modes[nextIdx]);
+    return;
+  }
+
+  // Peitmine (H) ja nähtavaks toomine (Alt+H)
+  if (k === 'h' && e.altKey) {
+    e.preventDefault();
+    allEditable().forEach(o => { o.visible = true; });
+    setStatus('Kõik peidetud elemendid tehtud nähtavaks (Alt+H)');
+    return;
+  }
+  if (k === 'h' && !e.altKey && !e.ctrlKey && selected && selected.userData?.movable) {
+    e.preventDefault();
+    selected.visible = false;
+    selectionBoxHelper.visible = false;
+    setStatus(`Peidetud: ${selected.userData?.name || selected.userData?.type || 'Objekt'} (Alt+H taastab)`);
+    deselect();
+    return;
+  }
+
   if (k === 'v') { setDrawMode(null); document.querySelector('[data-tool="select"]')?.click(); }
   if (k === 'g') { document.querySelector('[data-tool="move"]')?.click(); transform.setMode('translate'); }
   if (k === 'r' && !drawMode && selected?.userData?.movable) { e.preventDefault(); rotateSelected90(); return; }
   if (k === 'r') { document.querySelector('[data-tool="rotate"]')?.click(); transform.setMode('rotate'); }
   if (k === 's' && !e.ctrlKey) { document.querySelector('[data-tool="scale"]')?.click(); transform.setMode('scale'); }
   if (k === 'w' && !e.ctrlKey && !isWalking) setDrawMode(drawMode === 'wall' ? null : 'wall');
-  if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSelected(); return; }
+  if (k === 'b' && !e.ctrlKey) { e.preventDefault(); setDrawMode(drawMode === 'paint' ? null : 'paint'); return; }
+  if (k === 'i' && !e.ctrlKey) {
+    e.preventDefault();
+    if (drawMode !== 'paint') setDrawMode('paint');
+    setEyedropperActive(!isEyedropperActive);
+    return;
+  }
+  if (k === 'c' && !e.ctrlKey) {
+    e.preventDefault();
+    const pop = document.getElementById('section-cut-popover');
+    pop?.classList.toggle('hidden');
+    return;
+  }
+  if (k === 'm' && !e.ctrlKey) { e.preventDefault(); setDrawMode(drawMode === 'measure' ? null : 'measure'); return; }
+  if (k === 'delete' || k === 'backspace' || k === 'x') { e.preventDefault(); deleteSelected(); return; }
   if (k === 'escape') {
     if (viewMode === 'walk') setViewMode('3d');
     else { setDrawMode(null); deselect(); }
   }
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undo(); }
-  if ((e.ctrlKey || e.metaKey) && k === 'd') { e.preventDefault(); cloneSelected(); return; }
+  if ((e.ctrlKey || e.metaKey || e.shiftKey) && k === 'd') { e.preventDefault(); cloneSelected(); return; }
 });
 
 window.addEventListener('keyup', e => {
@@ -3790,6 +4593,173 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
+// Blender 3D Orientation Navigation Gizmo ja renderdus
+const gizmoCanvas = document.getElementById('gizmo-canvas');
+const gizmoCtx = gizmoCanvas ? gizmoCanvas.getContext('2d') : null;
+let isGizmoInteracting = false;
+let lastGizmoMouseX = 0, lastGizmoMouseY = 0;
+
+const GIZMO_AXES = [
+  { id: '+X', label: 'X', color: '#ef4444', dir: new THREE.Vector3(1, 0, 0), action: setSideView },
+  { id: '-X', label: '', color: '#64748b', dir: new THREE.Vector3(-1, 0, 0), action: () => {
+    if (viewMode === 'walk') setViewMode('3d');
+    const dist = Math.max(16, camera.position.distanceTo(controls.target));
+    const target = controls.target.clone();
+    animateCameraTo(new THREE.Vector3(target.x - dist, target.y + 2.5, target.z), target, 280);
+    setStatus('Vasak külgvaade');
+  }},
+  { id: '+Y', label: 'Y', color: '#22c55e', dir: new THREE.Vector3(0, 1, 0), action: setTopView },
+  { id: '-Y', label: '', color: '#64748b', dir: new THREE.Vector3(0, -1, 0), action: () => {
+    if (viewMode === 'walk') setViewMode('3d');
+    const dist = Math.max(16, camera.position.distanceTo(controls.target));
+    const target = controls.target.clone();
+    animateCameraTo(new THREE.Vector3(target.x, target.y - dist, target.z + 0.001), target, 280);
+    setStatus('Altvaade');
+  }},
+  { id: '+Z', label: 'Z', color: '#3b82f6', dir: new THREE.Vector3(0, 0, 1), action: setFrontView },
+  { id: '-Z', label: '', color: '#64748b', dir: new THREE.Vector3(0, 0, -1), action: () => {
+    if (viewMode === 'walk') setViewMode('3d');
+    const dist = Math.max(16, camera.position.distanceTo(controls.target));
+    const target = controls.target.clone();
+    animateCameraTo(new THREE.Vector3(target.x, target.y + 2.5, target.z - dist), target, 280);
+    setStatus('Tagantvaade');
+  }},
+];
+
+function renderBlenderGizmo() {
+  if (!gizmoCtx || !gizmoCanvas) return;
+  const w = gizmoCanvas.width, h = gizmoCanvas.height;
+  gizmoCtx.clearRect(0, 0, w, h);
+
+  const cx = w / 2, cy = h / 2;
+  const radius = 33;
+
+  // Taustakera
+  gizmoCtx.beginPath();
+  gizmoCtx.arc(cx, cy, 38, 0, Math.PI * 2);
+  gizmoCtx.fillStyle = 'rgba(15, 23, 42, 0.45)';
+  gizmoCtx.fill();
+  gizmoCtx.lineWidth = 1.2;
+  gizmoCtx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+  gizmoCtx.stroke();
+
+  // Kaamera pööramise maatriks
+  const rotMatrix = new THREE.Matrix4().extractRotation(camera.matrixWorldInverse);
+
+  const projected = GIZMO_AXES.map(ax => {
+    const v = ax.dir.clone().applyMatrix4(rotMatrix);
+    const sx = cx + v.x * radius;
+    const sy = cy - v.y * radius;
+    return { ...ax, v, sx, sy, z: v.z };
+  });
+
+  // Joonista sügavuse järgi (tagumised enne)
+  projected.sort((a, b) => a.z - b.z);
+
+  projected.forEach(ax => {
+    gizmoCtx.beginPath();
+    gizmoCtx.moveTo(cx, cy);
+    gizmoCtx.lineTo(ax.sx, ax.sy);
+    gizmoCtx.strokeStyle = ax.label ? ax.color : 'rgba(148, 163, 184, 0.4)';
+    gizmoCtx.lineWidth = ax.label ? 2.5 : 1.2;
+    gizmoCtx.stroke();
+
+    gizmoCtx.beginPath();
+    const nodeRadius = ax.label ? 8.5 : 4.5;
+    gizmoCtx.arc(ax.sx, ax.sy, nodeRadius, 0, Math.PI * 2);
+    gizmoCtx.fillStyle = ax.label ? ax.color : 'rgba(100, 116, 139, 0.8)';
+    gizmoCtx.fill();
+    gizmoCtx.strokeStyle = '#ffffff';
+    gizmoCtx.lineWidth = 1.2;
+    gizmoCtx.stroke();
+
+    if (ax.label) {
+      gizmoCtx.fillStyle = '#ffffff';
+      gizmoCtx.font = 'bold 9.5px ui-sans-serif, system-ui, sans-serif';
+      gizmoCtx.textAlign = 'center';
+      gizmoCtx.textBaseline = 'middle';
+      gizmoCtx.fillText(ax.label, ax.sx, ax.sy);
+    }
+  });
+}
+
+// Gizmo hiire interaktsioon
+if (gizmoCanvas) {
+  gizmoCanvas.addEventListener('pointerdown', e => {
+    const rect = gizmoCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const rotMatrix = new THREE.Matrix4().extractRotation(camera.matrixWorldInverse);
+    const radius = 33, cx = 48, cy = 48;
+    let clickedAxis = null;
+
+    GIZMO_AXES.forEach(axis => {
+      const v = axis.dir.clone().applyMatrix4(rotMatrix);
+      const sx = cx + v.x * radius;
+      const sy = cy - v.y * radius;
+      const dist = Math.hypot(mx - sx, my - sy);
+      if (dist <= (axis.label ? 11 : 7)) {
+        clickedAxis = axis;
+      }
+    });
+
+    if (clickedAxis) {
+      clickedAxis.action();
+      return;
+    }
+
+    isGizmoInteracting = true;
+    lastGizmoMouseX = e.clientX;
+    lastGizmoMouseY = e.clientY;
+    e.preventDefault();
+  });
+
+  window.addEventListener('pointermove', e => {
+    if (!isGizmoInteracting || viewMode === 'walk') return;
+    const dx = e.clientX - lastGizmoMouseX;
+    const dy = e.clientY - lastGizmoMouseY;
+    lastGizmoMouseX = e.clientX;
+    lastGizmoMouseY = e.clientY;
+
+    const offset = camera.position.clone().sub(controls.target);
+    let theta = Math.atan2(offset.x, offset.z);
+    let phi = Math.atan2(Math.sqrt(offset.x * offset.x + offset.z * offset.z), offset.y);
+
+    theta -= dx * 0.012;
+    phi = THREE.MathUtils.clamp(phi - dy * 0.012, 0.05, Math.PI * 0.495);
+
+    const dist = offset.length();
+    camera.position.x = controls.target.x + dist * Math.sin(phi) * Math.sin(theta);
+    camera.position.y = controls.target.y + dist * Math.cos(phi);
+    camera.position.z = controls.target.z + dist * Math.sin(phi) * Math.cos(theta);
+    camera.lookAt(controls.target);
+    controls.update();
+  });
+
+  window.addEventListener('pointerup', () => {
+    isGizmoInteracting = false;
+  });
+}
+
+// FPS ja jõudluse mõõtja
+let lastFpsTime = performance.now();
+let frameCount = 0;
+function updateFpsCounter() {
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime >= 500) {
+    const fps = Math.round((frameCount * 1000) / (now - lastFpsTime));
+    const fpsEl = document.getElementById('cad-fps');
+    if (fpsEl) {
+      fpsEl.textContent = `${fps} FPS`;
+      fpsEl.style.color = fps >= 45 ? '#166534' : fps >= 25 ? '#ca8a04' : '#dc2626';
+    }
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+}
+
 // Käivita saunamall ja disainitööriistad vaikimisi
 placeSaunaTemplate();
 rebuildPlotMesh();
@@ -3810,7 +4780,9 @@ resize();
     if (walkKeys.s) walkPos.addScaledVector(forward, -speed);
     if (walkKeys.a) walkPos.addScaledVector(right, -speed);
     if (walkKeys.d) walkPos.addScaledVector(right, speed);
-    camera.position.set(walkPos.x, FLOOR_Y + 1.7, walkPos.z);
+    const targetEyeY = getPlacementY('humanScale', walkPos.x, walkPos.z) + 1.7;
+    walkPos.y = (walkPos.y || targetEyeY) + (targetEyeY - (walkPos.y || targetEyeY)) * 0.18;
+    camera.position.set(walkPos.x, walkPos.y, walkPos.z);
     const target = camera.position.clone().add(new THREE.Vector3(
       Math.sin(walkYaw) * Math.cos(walkPitch),
       Math.sin(walkPitch),
@@ -3821,6 +4793,8 @@ resize();
     controls.update();
   }
   renderer.render(scene, camera);
+  renderBlenderGizmo();
+  updateFpsCounter();
 })();
 
 setStatus('KoduDisain ' + APP.phase);
@@ -4009,3 +4983,52 @@ document.getElementById('btn-share')?.addEventListener('click', async () => {
     }
   }
 })();
+
+// ============================================================================
+// ARHITEKTUURSETE TÖÖRIISTADE SÜNDMUSTE SIDUMINE (Section Cut, Snap, Brush)
+// ============================================================================
+
+// 1. Sektsioonlõike nupud ja slaidrid
+document.getElementById('btn-section-cut')?.addEventListener('click', () => {
+  const popover = document.getElementById('section-cut-popover');
+  popover?.classList.toggle('hidden');
+});
+document.getElementById('btn-section-cut-close')?.addEventListener('click', () => {
+  document.getElementById('section-cut-popover')?.classList.add('hidden');
+});
+document.querySelectorAll('.sc-preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setSectionCut(Number(btn.dataset.height) || 0);
+  });
+});
+document.getElementById('section-cut-slider')?.addEventListener('input', e => {
+  setSectionCut(Number(e.target.value) || 1.2);
+});
+
+// 2. Seinamagneti (auto wall snap) nupp HUD-ribal
+document.getElementById('btn-wall-snap')?.addEventListener('click', e => {
+  autoWallSnapEnabled = !autoWallSnapEnabled;
+  e.currentTarget.classList.toggle('active', autoWallSnapEnabled);
+  setStatus(autoWallSnapEnabled ? '🧲 Seinamagnet aktiivne (mööbel haakub seina äärde)' : 'Seinamagnet välja lülitatud');
+  if (autoWallSnapEnabled && selected) snapSelectedToWall();
+});
+
+// 3. Materjalipintsli UI sündmused (vahelehed, pipett, sulgemine)
+document.querySelectorAll('.brush-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.brush-tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentBrushTab = btn.dataset.tab || 'floor';
+    const list = BRUSH_PALETTES[currentBrushTab];
+    if (list && list[0] && !list.some(x => x.id === currentBrushMat)) {
+      currentBrushMat = list[0].id;
+    }
+    renderBrushSwatches();
+  });
+});
+document.getElementById('btn-brush-eyedropper')?.addEventListener('click', () => {
+  setEyedropperActive(!isEyedropperActive);
+});
+document.getElementById('btn-brush-close')?.addEventListener('click', () => {
+  setDrawMode(null);
+});
