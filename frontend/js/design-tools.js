@@ -247,26 +247,41 @@ export function analyzeErgonomics(walls, rooms, objects) {
   });
 
   // Kokkuvõte
-  let status = 'good';
+  let badgeStatus = 'good';
   let summaryText = 'Ergonoomika: Suurepärane · Käiguteed vabad';
 
   if (blockedDoors > 0) {
-    status = 'warning';
+    badgeStatus = 'error';
     summaryText = `Tähelepanu: ${blockedDoors} ukse avanemistee on takistatud`;
   } else if (tightCorridors > 0) {
-    status = 'notice';
+    badgeStatus = 'warn';
     summaryText = `Ergonoomika: ${tightCorridors} kitsast käiguteed (< 0.8 m)`;
   } else if (objects.length > 3) {
     summaryText = `Ergonoomika: Hea ruumijaotus · Vaba liikumine tagatud`;
   }
 
+  const doorClearanceRatio = totalDoors > 0
+    ? Math.round(((totalDoors - blockedDoors) / totalDoors) * 100)
+    : 100;
+  const minClearanceM = minClearanceFound === 999 ? '0.90' : minClearanceFound.toFixed(2);
+
   return {
-    status,
+    status: badgeStatus,
+    badgeStatus,
+    summary: summaryText,
     summaryText,
     issues,
     totalDoors,
     blockedDoors,
     tightCorridors,
-    minClearance: minClearanceFound === 999 ? null : minClearanceFound.toFixed(2),
+    minClearance: minClearanceM,
+    stats: {
+      doorClearanceRatio,
+      minClearanceM,
+      totalItems: objects.filter(o => o.userData?.movable && o.userData?.kind !== 'wall' && o.userData?.kind !== 'room').length,
+      totalDoors,
+      blockedDoors,
+      tightCorridors,
+    },
   };
 }

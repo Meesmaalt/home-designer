@@ -2733,13 +2733,14 @@ function applyDesignStyle(styleKey, scope = 'all') {
 let ergoGuidesEnabled = true;
 
 function runErgoCheck() {
-  const result = analyzeErgonomics(walls, rooms, allEditable());
+  const result = analyzeErgonomics(walls, rooms, allEditable()) || {};
   const badge = document.getElementById('ergo-badge');
   const badgeText = document.getElementById('ergo-text');
+  const badgeStatus = result.badgeStatus || 'good';
 
   if (badge && badgeText) {
-    badge.className = `ergo-badge ${result.badgeStatus}`;
-    badgeText.textContent = `Ergonoomika: ${result.badgeStatus === 'good' ? 'Suurepärane' : result.badgeStatus === 'warn' ? '1 kitsaskoht' : 'Tähelepanu!'}`;
+    badge.className = `ergo-badge ${badgeStatus}`;
+    badgeText.textContent = `Ergonoomika: ${badgeStatus === 'good' ? 'Suurepärane' : badgeStatus === 'warn' ? '1 kitsaskoht' : 'Tähelepanu!'}`;
   }
 
   // Uuenda modaalakna sisu
@@ -2751,12 +2752,18 @@ function runErgoCheck() {
   const statItems = document.getElementById('ergo-stat-items');
   const issuesList = document.getElementById('ergo-issues-list');
 
-  if (summaryStrip) summaryStrip.className = `ergo-summary-strip ${result.badgeStatus}`;
-  if (modalTitle) modalTitle.textContent = result.badgeStatus === 'good' ? 'Ergonoomika: Suurepärane' : result.badgeStatus === 'warn' ? 'Ergonoomika: Väikesed kitsaskohad' : 'Ergonoomika: Vajab tähelepanu';
-  if (modalDesc) modalDesc.textContent = result.summary;
-  if (statDoors) statDoors.textContent = `${result.stats.doorClearanceRatio}% vaba`;
-  if (statClearance) statClearance.textContent = `${result.stats.minClearanceM} m`;
-  if (statItems) statItems.textContent = `${result.stats.totalItems} tk`;
+  const stats = result.stats || {
+    doorClearanceRatio: 100,
+    minClearanceM: result.minClearance || '0.90',
+    totalItems: 0,
+  };
+
+  if (summaryStrip) summaryStrip.className = `ergo-summary-strip ${badgeStatus}`;
+  if (modalTitle) modalTitle.textContent = badgeStatus === 'good' ? 'Ergonoomika: Suurepärane' : badgeStatus === 'warn' ? 'Ergonoomika: Väikesed kitsaskohad' : 'Ergonoomika: Vajab tähelepanu';
+  if (modalDesc) modalDesc.textContent = result.summary || result.summaryText || 'Ruumiline ergonoomika kontrollitud.';
+  if (statDoors) statDoors.textContent = `${stats.doorClearanceRatio ?? 100}% vaba`;
+  if (statClearance) statClearance.textContent = `${stats.minClearanceM ?? '0.90'} m`;
+  if (statItems) statItems.textContent = `${stats.totalItems ?? 0} tk`;
 
   if (issuesList) {
     if (!result.issues || result.issues.length === 0) {
