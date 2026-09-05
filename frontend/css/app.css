@@ -1382,5 +1382,86 @@ button.block { width: 100%; }
   color: #1e293b;
 }
 
+/* Mööbli viimistluse värvipalett (Swatches) */
+.finish-swatches-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.swatch-btn {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.swatch-btn:hover {
+  transform: scale(1.2);
+  border-color: var(--accent);
+}
+
+/* Fotorežiimi kinematograafiline teavitusriba */
+.photo-mode-bar {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 30px;
+  padding: 0.5rem 1.1rem;
+  color: #f8fafc;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+.photo-mode-info strong {
+  display: block;
+  font-size: 0.84rem;
+  letter-spacing: 0.02em;
+  color: #f1f5f9;
+}
+
+.photo-mode-info small {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.photo-mode-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.photo-mode-actions button {
+  min-height: 32px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 20px;
+}
+
+.cat-items button[draggable="true"] {
+  cursor: grab;
+}
+
+.cat-items button[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 
 

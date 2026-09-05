@@ -8,6 +8,9 @@ import {
   getPaverTexture,
   getWaterTexture,
   getRugTexture,
+  getBoucleTexture,
+  getWalnutTexture,
+  getLeatherTexture,
 } from './textures.js';
 
 export function createMaterial(color, options = {}) {
@@ -86,6 +89,11 @@ const MAT = {
   fabricGray: createMaterial(0x5c6570, { r: 0.9 }),
   fabricWarm: createMaterial(0xd8c8b4, { r: 0.92 }),
   fabricNavy: createMaterial(0x2b3848, { r: 0.9 }),
+  fabricBoucle: createMaterial(0xf5f3ee, { r: 0.94, map: getBoucleTexture() }),
+  woodWalnut: createMaterial(0x4c3528, { r: 0.55, map: getWalnutTexture() }),
+  leatherCognac: createMaterial(0x874c27, { r: 0.45, map: getLeatherTexture() }),
+  brass: createMaterial(0xd4af37, { m: 0.85, r: 0.25 }),
+  terracotta: createMaterial(0xc4684b, { r: 0.85 }),
   ceramicWhite: createMaterial(0xfcfcfc, { r: 0.2 }),
   fireOrange: createMaterial(0xff7700, { r: 0.3, emissive: 0xff5500, emissiveIntensity: 0.8 }),
   lampGlow: createMaterial(0xfff5dd, { r: 0.2, emissive: 0xffe6aa, emissiveIntensity: 1.0 }),
@@ -1316,4 +1324,55 @@ export const ASSET_BUILDERS = {
     return mark(g, 'gardenLantern', 'furniture');
   },
 };
+
+/**
+ * Mööbli ja sisustuse viimistlusmaterjalide dünaamiline vahetamine
+ */
+export const FURNITURE_FINISHES = {
+  fabric_gray: { name: 'Klassikaline hall tekstiil', mat: MAT.fabricGray },
+  fabric_warm: { name: 'Soe linane beež', mat: MAT.fabricWarm },
+  fabric_boucle: { name: 'Põhjamaine hele Bouclé', mat: MAT.fabricBoucle },
+  fabric_navy: { name: 'Sügav öösinine kangas', mat: MAT.fabricNavy },
+  leather_cognac: { name: 'Konjaki tooni naturaalnahk', mat: MAT.leatherCognac },
+  wood_light: { name: 'Hele naturaalne tamm', mat: MAT.woodLight },
+  wood_dark: { name: 'Tume suitsutamm', mat: MAT.woodDark },
+  wood_walnut: { name: 'Soe väärikas pähkel', mat: MAT.woodWalnut },
+  metal_black: { name: 'Matt must teras', mat: MAT.metal },
+  metal_brass: { name: 'Harjatud soe messing / kuld', mat: MAT.brass },
+  ceramic_white: { name: 'Karge valge keraamika', mat: MAT.ceramicWhite },
+  terracotta: { name: 'Soe savi / terrakota', mat: MAT.terracotta },
+};
+
+export function applyFurnitureFinish(group, finishKey) {
+  const finish = FURNITURE_FINISHES[finishKey];
+  if (!finish || !group) return;
+  group.userData.customFinish = finishKey;
+
+  group.traverse(child => {
+    if (child.isMesh && child.material) {
+      // Kui objektil on tekstiil, puit või viimistletav pind
+      const currentMat = child.material;
+      if (finishKey.startsWith('fabric_') || finishKey.startsWith('leather_')) {
+        // Asenda pehmed polstrid ja padjad
+        if (currentMat === MAT.fabricGray || currentMat === MAT.fabricWarm || currentMat === MAT.fabricNavy || currentMat === MAT.fabricBoucle || currentMat === MAT.leatherCognac) {
+          child.material = finish.mat;
+        }
+      } else if (finishKey.startsWith('wood_')) {
+        // Asenda puitpinnad
+        if (currentMat === MAT.woodLight || currentMat === MAT.woodDark || currentMat === MAT.woodWalnut) {
+          child.material = finish.mat;
+        }
+      } else if (finishKey.startsWith('metal_')) {
+        // Asenda metalljalad/raamid
+        if (currentMat === MAT.metal || currentMat === MAT.brass || currentMat === MAT.whiteMetal) {
+          child.material = finish.mat;
+        }
+      } else if (finishKey === 'ceramic_white' || finishKey === 'terracotta') {
+        if (currentMat === MAT.ceramicWhite || currentMat === MAT.terracotta) {
+          child.material = finish.mat;
+        }
+      }
+    }
+  });
+}
 

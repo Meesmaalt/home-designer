@@ -284,3 +284,71 @@ export function getRugTexture() {
   textureCache.set('rug', tex);
   return tex;
 }
+
+// 8. Bouclé kangas (luksuslik pehme tekstuur diivanitele ja tugitoolidele)
+export function getBoucleTexture() {
+  if (textureCache.has('boucle')) return textureCache.get('boucle');
+  const tex = createProceduralCanvas(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#f4f1ea';
+    ctx.fillRect(0, 0, w, h);
+
+    // Bouclé villatutikesed ja pehmed silmused
+    for (let i = 0; i < 3000; i++) {
+      const cx = Math.random() * w;
+      const cy = Math.random() * h;
+      const r = 1.2 + Math.random() * 2.2;
+      const shade = Math.random();
+      ctx.fillStyle = shade > 0.5 ? 'rgba(255, 255, 255, 0.45)' : 'rgba(215, 207, 195, 0.55)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+  tex.repeat.set(6, 6);
+  textureCache.set('boucle', tex);
+  return tex;
+}
+
+// 9. Pähklipuu tekstuur (luksuslik soe tume puit)
+export function getWalnutTexture() {
+  if (textureCache.has('walnut')) return textureCache.get('walnut');
+  const tex = createProceduralCanvas(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#4c3528';
+    ctx.fillRect(0, 0, w, h);
+
+    // Peened lainjad pähklisüüd
+    for (let i = 0; i < 30; i++) {
+      const y = Math.random() * h;
+      ctx.strokeStyle = Math.random() > 0.5 ? 'rgba(56, 38, 27, 0.4)' : 'rgba(92, 68, 52, 0.35)';
+      ctx.lineWidth = 1 + Math.random() * 2.5;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.bezierCurveTo(w * 0.35, y + (Math.random() - 0.5) * 12, w * 0.7, y + (Math.random() - 0.5) * 12, w, y);
+      ctx.stroke();
+    }
+  });
+  tex.repeat.set(2, 2);
+  textureCache.set('walnut', tex);
+  return tex;
+}
+
+// 10. Konjaki tooni nahktekstuur
+export function getLeatherTexture() {
+  if (textureCache.has('leather')) return textureCache.get('leather');
+  const tex = createProceduralCanvas(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#874c27';
+    ctx.fillRect(0, 0, w, h);
+
+    // Nahapoorid ja mikrostruktuur
+    for (let i = 0; i < 2500; i++) {
+      const x = Math.random() * w;
+      const y = Math.random() * h;
+      ctx.fillStyle = Math.random() > 0.5 ? 'rgba(80, 42, 18, 0.3)' : 'rgba(160, 98, 54, 0.25)';
+      ctx.fillRect(x, y, 1.5, 1.5);
+    }
+  });
+  tex.repeat.set(4, 4);
+  textureCache.set('leather', tex);
+  return tex;
+}
+

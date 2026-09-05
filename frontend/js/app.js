@@ -9,7 +9,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
   SITE, CATALOG, MATERIALS, PRICES, APP, WALL_PRESETS, OPENING_PRESETS, PLOT_DEFAULTS,
 } from './config.js';
-import { ASSET_BUILDERS, createMaterial, box, cyl } from './models.js';
+import { ASSET_BUILDERS, createMaterial, box, cyl, FURNITURE_FINISHES, applyFurnitureFinish } from './models.js';
 import { calculateConstruction, renderSpecificationHtml } from './construction.js';
 import {
   getGrassTexture,
@@ -47,21 +47,74 @@ const PESU_W = SITE.PESU_W, LEILI_W = SITE.LEILI_W;
 const FLOOR_Y = SITE.FLOOR_Y;
 
 const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: true,
+  preserveDrawingBuffer: true,
+  logarithmicDepthBuffer: true,
+  powerPreference: 'high-performance',
+});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 1.15;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x7ec8f0);
-scene.fog = new THREE.FogExp2(0xb0d4f0, 0.011);
+scene.background = new THREE.Color(0x84bfe6);
+scene.fog = new THREE.FogExp2(0xb2d6ee, 0.009);
 
-const cameraPersp = new THREE.PerspectiveCamera(42, 2, 0.05, 140);
+// Blender-sarnane pehme fotorealistlik stuudio- ja taevakeskkond (PMREM reflection map)
+function createStudioEnvironment(wRenderer) {
+  const pmremGenerator = new THREE.PMREMGenerator(wRenderer);
+  pmremGenerator.compileEquirectangularShader();
+
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+
+  // Taeva ja maapinna sujuv pehme peegeldusgradient
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0.0, '#a5d0ec'); // Seniit
+  grad.addColorStop(0.42, '#eef6fc'); // Silmapiiri hele taevas
+  grad.addColorStop(0.50, '#f2ece4'); // Maapinna soe valguspeegeldus
+  grad.addColorStop(0.68, '#82937e'); // Haljastus / muru peegeldus
+  grad.addColorStop(1.0, '#3e4839'); // Sügav maapind
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 256);
+
+  // Pehme päikeseläige keskkonnas
+  const sunX = 512 * 0.35, sunY = 256 * 0.28;
+  const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 80);
+  sunGrad.addColorStop(0, 'rgba(255, 255, 250, 1.0)');
+  sunGrad.addColorStop(0.3, 'rgba(255, 248, 230, 0.65)');
+  sunGrad.addColorStop(1, 'rgba(255, 240, 210, 0)');
+  ctx.fillStyle = sunGrad;
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, 80, 0, Math.PI * 2);
+  ctx.fill();
+
+  const texture = new THREE.CanvasTexture(c);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+  pmremGenerator.dispose();
+  texture.dispose();
+  return envMap;
+}
+
+try {
+  scene.environment = createStudioEnvironment(renderer);
+  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.85;
+} catch (e) {
+  console.warn('Environment map initialization deferred:', e);
+}
+
+const cameraPersp = new THREE.PerspectiveCamera(40, 2, 0.18, 150);
 cameraPersp.position.set(L / 2 - 3, 16, W / 2 + 13);
-const cameraOrtho = new THREE.OrthographicCamera(-16, 16, 16, -16, 0.1, 120);
+const cameraOrtho = new THREE.OrthographicCamera(-16, 16, 16, -16, 0.5, 120);
 cameraOrtho.position.set(L / 2 + 2, 45, W / 2);
 let camera = cameraPersp;
 let viewMode = '3d'; // '3d' | '2d' | 'blueprint' | 'walk'
@@ -69,9 +122,10 @@ let viewMode = '3d'; // '3d' | '2d' | 'blueprint' | 'walk'
 const controls = new OrbitControls(camera, canvas);
 controls.target.set(L / 2 + 2, 0.2, W / 2);
 controls.enableDamping = true;
+controls.dampingFactor = 0.06;
 controls.maxPolarAngle = Math.PI * 0.495;
-controls.minDistance = 1.5;
-controls.maxDistance = 85;
+controls.minDistance = 1.2;
+controls.maxDistance = 90;
 
 const transform = new TransformControls(camera, canvas);
 transform.setSize(0.75);
@@ -85,30 +139,34 @@ transform.addEventListener('objectChange', () => { syncProps(); clampSel(); });
 scene.add(transform);
 
 // Valguslahendus & Päevaajad
-const ambientLight = new THREE.AmbientLight(0xfff6eb, 0.55);
+const ambientLight = new THREE.AmbientLight(0xfff6eb, 0.58);
 scene.add(ambientLight);
 
-const sun = new THREE.DirectionalLight(0xfff0dd, 1.18);
-sun.position.set(14, 24, 10);
+const sun = new THREE.DirectionalLight(0xfff0dd, 1.25);
+sun.position.set(14, 26, 10);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = sun.shadow.camera.bottom = -30;
-sun.shadow.camera.right = sun.shadow.camera.top = 30;
-sun.shadow.camera.near = 0.5;
+sun.shadow.camera.left = sun.shadow.camera.bottom = -32;
+sun.shadow.camera.right = sun.shadow.camera.top = 32;
+sun.shadow.camera.near = 1.0;
 sun.shadow.camera.far = 75;
-sun.shadow.bias = -0.00025;
-sun.shadow.normalBias = 0.02;
+sun.shadow.bias = -0.00035;
+sun.shadow.normalBias = 0.025;
 scene.add(sun);
 
-const hemiLight = new THREE.HemisphereLight(0xd0e8ff, 0x5a8a40, 0.45);
+const hemiLight = new THREE.HemisphereLight(0xd4e9ff, 0x546e45, 0.52);
 scene.add(hemiLight);
 
+// Hubased soojad sisevalgustid ruumide jaoks
+const indoorLightsGroup = new THREE.Group();
+scene.add(indoorLightsGroup);
+
 const SUN_PRESETS = [
-  { name: 'Keskpäev (13:00)', pos: [12, 26, 8], color: 0xfffaed, sky: 0x7ec8f0, fog: 0xb0d4f0, hemiSky: 0xd8edff, hemiGround: 0x5a8a40, int: 1.2 },
-  { name: 'Õhtu (18:00)', pos: [-18, 14, 14], color: 0xffd29d, sky: 0x6bb5e8, fog: 0xa8cce5, hemiSky: 0xffdfc4, hemiGround: 0x3d5a2d, int: 1.0 },
-  { name: 'Kuldne tund (20:30)', pos: [-24, 5, 20], color: 0xff9452, sky: 0x486b99, fog: 0x738ba8, hemiSky: 0xffaa77, hemiGround: 0x22331b, int: 0.85 },
+  { name: 'Keskpäev (13:00)', pos: [12, 26, 8], color: 0xfffaed, sky: 0x84bfe6, fog: 0xb2d6ee, hemiSky: 0xd8edff, hemiGround: 0x5a8a40, int: 1.25 },
+  { name: 'Õhtu (18:00)', pos: [-18, 14, 14], color: 0xffd29d, sky: 0x6bb5e8, fog: 0xa8cce5, hemiSky: 0xffdfc4, hemiGround: 0x3d5a2d, int: 1.05 },
+  { name: 'Kuldne tund (20:30)', pos: [-24, 5, 20], color: 0xff9452, sky: 0x486b99, fog: 0x738ba8, hemiSky: 0xffaa77, hemiGround: 0x22331b, int: 0.9 },
   { name: 'Öö / Hubane valgus (23:00)', pos: [5, -15, 5], color: 0x243342, sky: 0x09141f, fog: 0x0c1a27, hemiSky: 0x162432, hemiGround: 0x0a1014, int: 0.22 },
-  { name: 'Hommik (8:00)', pos: [20, 16, -14], color: 0xffe6c4, sky: 0x75bfe8, fog: 0xafd2ec, hemiSky: 0xffeedd, hemiGround: 0x4e7838, int: 1.05 },
+  { name: 'Hommik (8:00)', pos: [20, 16, -14], color: 0xffe6c4, sky: 0x75bfe8, fog: 0xafd2ec, hemiSky: 0xffeedd, hemiGround: 0x4e7838, int: 1.1 },
 ];
 let currentSunIndex = 0;
 
@@ -166,8 +224,9 @@ Object.values(layers).forEach(g => scene.add(g));
 
 // Krundi maapind (muru)
 {
-  const g = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), MAT.grass);
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), MAT.grass);
   g.rotation.x = -Math.PI / 2;
+  g.position.y = -0.005;
   g.receiveShadow = true;
   layers.scenery.add(g);
 }
@@ -657,71 +716,163 @@ function rebuildRoof() {
     maxH = Math.max(maxH, w.h || H);
   });
 
-  const oh = roofConfig.overhang || 0.4;
+  const oh = roofConfig.overhang || 0.45;
   const bW = (maxX - minX) + oh * 2;
   const bD = (maxZ - minZ) + oh * 2;
   const midX = (minX + maxX) / 2;
   const midZ = (minZ + maxZ) / 2;
   const baseY = FLOOR_Y + maxH;
 
-  const matColorCode = MATERIALS[roofConfig.material]?.color ?? 0x363c44;
-  const roofMat = M(matColorCode, { r: 0.5, m: 0.3 });
-  const trimMat = M(0x22262a, { r: 0.4 });
-  const ceilingMat = M(0xe0dcd4, { r: 0.8 });
+  const matColorCode = MATERIALS[roofConfig.material]?.color ?? 0x2e353d;
+  const roofMat = M(matColorCode, { r: 0.42, m: 0.35 });
+  const trimMat = M(0x1a1e22, { r: 0.38, m: 0.25 });
+  const ceilingMat = M(0xede8df, { r: 0.85 });
+  const wallMatKey = walls[0]?.mat || 'wood';
+  const wallMatCode = MATERIALS[wallMatKey]?.color ?? 0xc99a6a;
+  const gableWallMat = M(wallMatCode, { r: 0.68 });
 
-  // Laeplaat hoone kohale
-  const ceiling = box(maxX - minX + 0.1, 0.08, maxZ - minZ + 0.1, ceilingMat, midX, baseY - 0.04, midZ);
+  // 1. Laeplaat hoone kohale (veidi sissepoole nihutatud, et vältida Z-fightingut seina ülaservaga)
+  const ceiling = box((maxX - minX) - 0.04, 0.04, (maxZ - minZ) - 0.04, ceilingMat, midX, baseY - 0.02, midZ);
+  ceiling.receiveShadow = true;
   roofGroup.add(ceiling);
 
   if (roofConfig.type === 'gable') {
-    // Viilkatus: harjajoon piki X või Z telge (vali pikem suund)
+    // Viilkatus: harjajoon piki pikemat hoone mõõdet
     const alongX = bW >= bD;
     const span = alongX ? bD : bW;
     const len = alongX ? bW : bD;
-    const pitchRad = ((roofConfig.pitch || 25) * Math.PI) / 180;
+    const pitchRad = ((roofConfig.pitch || 24) * Math.PI) / 180;
     const peakH = (span / 2) * Math.tan(pitchRad);
     const slopeLen = (span / 2) / Math.cos(pitchRad);
+    const slopeThick = 0.09;
 
     if (alongX) {
-      // Hari piki X
-      // Kalle 1 (Z-)
-      const slope1 = box(len, 0.06, slopeLen, roofMat);
-      slope1.rotation.x = pitchRad;
+      // Hari piki X (z = midZ, kõrgus baseY + peakH)
+      // Kalle 1 (Lõunapoolne, z < midZ): tõuseb z suunas harjani -> rotX = -pitchRad
+      const slope1 = box(len, slopeThick, slopeLen, roofMat);
+      slope1.rotation.x = -pitchRad;
       slope1.position.set(midX, baseY + peakH / 2, midZ - span / 4);
-      // Kalle 2 (Z+)
-      const slope2 = box(len, 0.06, slopeLen, roofMat);
-      slope2.rotation.x = -pitchRad;
+      slope1.castShadow = true;
+      slope1.receiveShadow = true;
+
+      // Kalle 2 (Põhjapoolne, z > midZ): langeb z suunas räästani -> rotX = +pitchRad
+      const slope2 = box(len, slopeThick, slopeLen, roofMat);
+      slope2.rotation.x = pitchRad;
       slope2.position.set(midX, baseY + peakH / 2, midZ + span / 4);
-      // Harjaplekk
-      const ridge = box(len + 0.05, 0.08, 0.18, trimMat, midX, baseY + peakH + 0.02, midZ);
-      roofGroup.add(slope1, slope2, ridge);
+      slope2.castShadow = true;
+      slope2.receiveShadow = true;
+
+      // Harjaplekk / Harjakivi
+      const ridge = box(len + 0.08, 0.08, 0.22, trimMat, midX, baseY + peakH + 0.03, midZ);
+      ridge.castShadow = true;
+
+      // Räästalauad / Tuulekastid (fascia boards) räästastel
+      const fascia1 = box(len + 0.04, 0.14, 0.035, trimMat, midX, baseY + 0.02, midZ - span / 2);
+      const fascia2 = box(len + 0.04, 0.14, 0.035, trimMat, midX, baseY + 0.02, midZ + span / 2);
+
+      // Otsaviilud (Gable end wall triangles) - sulgevad hoone otsad arhitektuurselt!
+      const gableSpan = maxZ - minZ;
+      const gablePeakH = (gableSpan / 2) * Math.tan(pitchRad);
+      [minX, maxX].forEach(gx => {
+        const shape = new THREE.Shape();
+        shape.moveTo(-gableSpan / 2, 0);
+        shape.lineTo(gableSpan / 2, 0);
+        shape.lineTo(0, gablePeakH);
+        shape.closePath();
+        const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: false });
+        const gableMesh = new THREE.Mesh(extrudeGeo, gableWallMat);
+        gableMesh.rotation.y = Math.PI / 2;
+        gableMesh.position.set(gx + (gx === minX ? 0.06 : -0.06), baseY, midZ);
+        gableMesh.castShadow = true;
+        gableMesh.receiveShadow = true;
+        roofGroup.add(gableMesh);
+      });
+
+      roofGroup.add(slope1, slope2, ridge, fascia1, fascia2);
     } else {
-      // Hari piki Z
-      const slope1 = box(slopeLen, 0.06, len, roofMat);
-      slope1.rotation.z = -pitchRad;
+      // Hari piki Z (x = midX, kõrgus baseY + peakH)
+      // Kalle 1 (Läänepoolne, x < midX): tõuseb x suunas harjani -> rotZ = +pitchRad
+      const slope1 = box(slopeLen, slopeThick, len, roofMat);
+      slope1.rotation.z = pitchRad;
       slope1.position.set(midX - span / 4, baseY + peakH / 2, midZ);
-      const slope2 = box(slopeLen, 0.06, len, roofMat);
-      slope2.rotation.z = pitchRad;
+      slope1.castShadow = true;
+      slope1.receiveShadow = true;
+
+      // Kalle 2 (Idapoolne, x > midX): langeb x suunas räästani -> rotZ = -pitchRad
+      const slope2 = box(slopeLen, slopeThick, len, roofMat);
+      slope2.rotation.z = -pitchRad;
       slope2.position.set(midX + span / 4, baseY + peakH / 2, midZ);
-      const ridge = box(0.18, 0.08, len + 0.05, trimMat, midX, baseY + peakH + 0.02, midZ);
-      roofGroup.add(slope1, slope2, ridge);
+      slope2.castShadow = true;
+      slope2.receiveShadow = true;
+
+      // Harjaplekk
+      const ridge = box(0.22, 0.08, len + 0.08, trimMat, midX, baseY + peakH + 0.03, midZ);
+      ridge.castShadow = true;
+
+      // Räästalauad
+      const fascia1 = box(0.035, 0.14, len + 0.04, trimMat, midX - span / 2, baseY + 0.02, midZ);
+      const fascia2 = box(0.035, 0.14, len + 0.04, trimMat, midX + span / 2, baseY + 0.02, midZ);
+
+      // Otsaviilud Z otstes
+      const gableSpan = maxX - minX;
+      const gablePeakH = (gableSpan / 2) * Math.tan(pitchRad);
+      [minZ, maxZ].forEach(gz => {
+        const shape = new THREE.Shape();
+        shape.moveTo(-gableSpan / 2, 0);
+        shape.lineTo(gableSpan / 2, 0);
+        shape.lineTo(0, gablePeakH);
+        shape.closePath();
+        const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: false });
+        const gableMesh = new THREE.Mesh(extrudeGeo, gableWallMat);
+        gableMesh.position.set(midX, baseY, gz + (gz === minZ ? 0.06 : -0.06));
+        gableMesh.castShadow = true;
+        gableMesh.receiveShadow = true;
+        roofGroup.add(gableMesh);
+      });
+
+      roofGroup.add(slope1, slope2, ridge, fascia1, fascia2);
     }
   } else if (roofConfig.type === 'shed') {
-    // Ühepoolne kalle
-    const pitchRad = ((roofConfig.pitch || 15) * Math.PI) / 180;
+    // Ühepoolne katus
+    const pitchRad = ((roofConfig.pitch || 14) * Math.PI) / 180;
     const slopeLen = bD / Math.cos(pitchRad);
-    const slope = box(bW, 0.07, slopeLen, roofMat);
-    slope.rotation.x = pitchRad;
-    slope.position.set(midX, baseY + (bD * Math.tan(pitchRad)) / 2, midZ);
-    roofGroup.add(slope);
+    const riseH = bD * Math.tan(pitchRad);
+    const slope = box(bW, 0.09, slopeLen, roofMat);
+    slope.rotation.x = -pitchRad;
+    slope.position.set(midX, baseY + riseH / 2, midZ);
+    slope.castShadow = true;
+    slope.receiveShadow = true;
+
+    // Küljekilbid / kiilukujulised viilud külgedel
+    [minX, maxX].forEach(gx => {
+      const shape = new THREE.Shape();
+      const sD = maxZ - minZ;
+      shape.moveTo(-sD / 2, 0);
+      shape.lineTo(sD / 2, 0);
+      shape.lineTo(sD / 2, sD * Math.tan(pitchRad));
+      shape.closePath();
+      const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: false });
+      const wedgeMesh = new THREE.Mesh(extrudeGeo, gableWallMat);
+      wedgeMesh.rotation.y = Math.PI / 2;
+      wedgeMesh.position.set(gx - 0.06, baseY, midZ);
+      wedgeMesh.castShadow = true;
+      wedgeMesh.receiveShadow = true;
+      roofGroup.add(wedgeMesh);
+    });
+
+    const fasciaBack = box(bW + 0.04, 0.16, 0.04, trimMat, midX, baseY + riseH, maxZ + oh);
+    const fasciaFront = box(bW + 0.04, 0.16, 0.04, trimMat, midX, baseY, minZ - oh);
+    roofGroup.add(slope, fasciaBack, fasciaFront);
   } else if (roofConfig.type === 'flat') {
-    // Lamekatus koos parapetiga
-    const flat = box(bW, 0.16, bD, roofMat, midX, baseY + 0.08, midZ);
-    // ääreparapett
-    const p1 = box(bW, 0.22, 0.08, trimMat, midX, baseY + 0.2, midZ - bD / 2);
-    const p2 = box(bW, 0.22, 0.08, trimMat, midX, baseY + 0.2, midZ + bD / 2);
-    const p3 = box(0.08, 0.22, bD, trimMat, midX - bW / 2, baseY + 0.2, midZ);
-    const p4 = box(0.08, 0.22, bD, trimMat, midX + bW / 2, baseY + 0.2, midZ);
+    // Lamekatus koos parapeti ja veeplekiga
+    const flat = box(bW, 0.16, bD, roofMat, midX, baseY + 0.06, midZ);
+    flat.castShadow = true;
+    flat.receiveShadow = true;
+    const pThick = 0.10, pH = 0.26;
+    const p1 = box(bW, pH, pThick, trimMat, midX, baseY + pH / 2, midZ - bD / 2 + pThick / 2);
+    const p2 = box(bW, pH, pThick, trimMat, midX, baseY + pH / 2, midZ + bD / 2 - pThick / 2);
+    const p3 = box(pThick, pH, bD, trimMat, midX - bW / 2 + pThick / 2, baseY + pH / 2, midZ);
+    const p4 = box(pThick, pH, bD, trimMat, midX + bW / 2 - pThick / 2, baseY + pH / 2, midZ);
     roofGroup.add(flat, p1, p2, p3, p4);
   }
 }
@@ -731,6 +882,7 @@ const roomSprites = new Map();
 function rebuildRooms() {
   roomSprites.forEach(s => layers.building.remove(s));
   roomSprites.clear();
+  while (indoorLightsGroup.children.length) indoorLightsGroup.remove(indoorLightsGroup.children[0]);
   // eemalda vanad põrandaplaadid
   [...layers.building.children].filter(c => c.userData.roomFloor).forEach(c => layers.building.remove(c));
 
@@ -745,6 +897,9 @@ function rebuildRooms() {
     else if (floorKey === 'paver') floorTex = getPaverTexture();
     else if (floorKey === 'grass') floorTex = getGrassTexture();
     const floorMat = M(matConfig.color, { r: matConfig.r ?? 0.55, map: floorTex });
+    floorMat.polygonOffset = true;
+    floorMat.polygonOffsetFactor = -1;
+    floorMat.polygonOffsetUnits = -1;
     const sideLen = Math.max(1.2, Math.sqrt(r.area || 10));
     const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(sideLen, sideLen), floorMat);
     floorMesh.rotation.x = -Math.PI / 2;
@@ -753,6 +908,11 @@ function rebuildRooms() {
     floorMesh.userData.roomFloor = true;
     floorMesh.userData.roomId = r.id;
     layers.building.add(floorMesh);
+
+    // 1b. Hubane soe sisevalgustus ruumile (Blender-sarnane pehme interjöörisära)
+    const roomLight = new THREE.PointLight(0xffebd2, 0.45, Math.max(4.5, sideLen * 1.4), 2);
+    roomLight.position.set(r.x, FLOOR_Y + 2.1, r.z);
+    indoorLightsGroup.add(roomLight);
 
     // 1b. Põranda aluskihtide 3D konstruktsioon (plaat, soojustus, killustik)
     const fAsmKey = r.floorAssemblyKey || (r.floorMat === 'paver' ? 'terrace_paver_ground' : r.floorMat === 'tile_gray' ? 'ground_slab_tile' : 'ground_slab_heated');
@@ -1492,9 +1652,11 @@ function select(o) {
 
   const isWall = o.userData.kind === 'wall';
   const isRoom = o.userData.kind === 'room';
+  const isFurniture = o.userData.kind === 'furniture' || (!isWall && !isRoom);
   document.getElementById('props-wall').classList.toggle('hidden', !isWall);
   document.getElementById('props-room').classList.toggle('hidden', !isRoom);
   document.getElementById('props-mat').classList.toggle('hidden', !isWall);
+  document.getElementById('props-furniture-finish')?.classList.toggle('hidden', !isFurniture);
   syncProps();
   refreshList();
   setStatus((o.userData.type || 'objekt') + ' valitud');
@@ -1564,6 +1726,34 @@ function syncProps() {
     document.getElementById('p-z').value = selected.position.z.toFixed(2);
     document.getElementById('p-ry').value = Math.round(THREE.MathUtils.radToDeg(selected.rotation.y));
     document.getElementById('p-s').value = selected.scale.x.toFixed(2);
+
+    // Ruumiline ja ergonoomiline info
+    const nearWall = findNearestWall(selected.position.x, selected.position.z, walls);
+    const wallDistEl = document.getElementById('meta-wall-dist');
+    if (wallDistEl) {
+      wallDistEl.textContent = nearWall ? `${nearWall.dist.toFixed(2)} m (${nearWall.dist < 0.15 ? 'seina ääres' : 'eemal'})` : '-';
+    }
+    const contRoom = findContainingRoom(selected.position.x, selected.position.z, rooms);
+    const roomNameEl = document.getElementById('meta-room-name');
+    if (roomNameEl) {
+      roomNameEl.textContent = contRoom ? (contRoom.name || 'Ruum') : 'Krundi õueala / terrass';
+    }
+    const ergoEl = document.getElementById('meta-ergo-status');
+    if (ergoEl) {
+      if (nearWall && nearWall.dist < 0.12) {
+        ergoEl.textContent = 'Joondatud seina äärde';
+        ergoEl.style.color = '#38bdf8';
+      } else {
+        ergoEl.textContent = 'Vaba liikumisruum';
+        ergoEl.style.color = 'var(--accent)';
+      }
+    }
+
+    // Mööbli viimistluse kuvamine
+    const finishSelect = document.getElementById('p-furniture-finish');
+    if (finishSelect && selected.userData.customFinish) {
+      finishSelect.value = selected.userData.customFinish;
+    }
   }
 }
 
@@ -1617,6 +1807,13 @@ function applyProps() {
     pushHist();
     return;
   }
+
+  // Mööbli või sisustuse viimistlus
+  const finishVal = document.getElementById('p-furniture-finish')?.value;
+  if (finishVal && finishVal !== selected.userData.customFinish) {
+    applyFurnitureFinish(selected, finishVal);
+  }
+
   selected.position.set(
     +document.getElementById('p-x').value || 0,
     +document.getElementById('p-y').value || 0,
@@ -1628,8 +1825,23 @@ function applyProps() {
   pushHist();
 }
 
-['p-x', 'p-y', 'p-z', 'p-ry', 'p-s', 'p-wh', 'p-wt', 'p-mat', 'p-name', 'p-floor-mat', 'p-wall-assembly', 'p-floor-assembly'].forEach(id => {
+['p-x', 'p-y', 'p-z', 'p-ry', 'p-s', 'p-wh', 'p-wt', 'p-mat', 'p-name', 'p-floor-mat', 'p-wall-assembly', 'p-floor-assembly', 'p-furniture-finish'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', applyProps);
+});
+
+// Kiirvaliku värvinupud (swatches)
+document.querySelectorAll('#finish-swatches-row .swatch-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!selected || selected.userData.kind === 'wall' || selected.userData.kind === 'room') return;
+    const finishKey = btn.dataset.finish;
+    if (finishKey) {
+      const finishSelect = document.getElementById('p-furniture-finish');
+      if (finishSelect) finishSelect.value = finishKey;
+      applyFurnitureFinish(selected, finishKey);
+      pushHist();
+      setStatus(`Viimistlus muudetud: ${FURNITURE_FINISHES[finishKey]?.name || finishKey}`);
+    }
+  });
 });
 
 function setStatus(t) {
@@ -1717,7 +1929,7 @@ function renderCatalog(query = '', filterKey = currentCatalogCategory) {
     <div class="cat-block" data-category="${c.cat}">
       <div class="cat-title">${c.cat} <small style="font-size:0.75rem;opacity:0.65;">(${c.items.length})</small></div>
       <div class="cat-items">
-        ${c.items.map(i => `<button type="button" data-add="${i.id}" title="Lisa ${i.name.toLocaleLowerCase('et')}"><span class="icon">${i.icon}</span><span>${i.name}</span></button>`).join('')}
+        ${c.items.map(i => `<button type="button" draggable="true" data-add="${i.id}" title="Lohista või klõpsa, et lisada ${i.name.toLocaleLowerCase('et')}"><span class="icon">${i.icon}</span><span>${i.name}</span></button>`).join('')}
       </div>
     </div>`).join('');
 
@@ -1734,6 +1946,11 @@ function renderCatalog(query = '', filterKey = currentCatalogCategory) {
         setStatus('Lisatud: ' + (item?.name || b.dataset.add));
       }
     };
+
+    b.addEventListener('dragstart', ev => {
+      ev.dataTransfer.setData('text/plain', b.dataset.add);
+      ev.dataTransfer.effectAllowed = 'copy';
+    });
   });
 }
 
@@ -1749,37 +1966,69 @@ document.querySelectorAll('.cat-pill').forEach(pill => {
 renderCatalog();
 catalogSearch?.addEventListener('input', () => renderCatalog(catalogSearch.value, currentCatalogCategory));
 
-// Valitud objekti kiirtoimingud (90° pööre, kloonimine, põrandale asetamine, kustutamine)
+// Valitud objekti kiirtoimingud (seina äärde joondamine, tsentreerimine, 90° pööre, kloonimine, põrandale asetamine, kustutamine)
+function snapSelectedToWall() {
+  if (!selected || !selected.userData?.movable) return;
+  const changed = alignToWall(selected, walls);
+  if (changed) {
+    syncProps();
+    clampSel();
+    pushHist();
+    refreshQuote();
+    runErgoCheck();
+    setStatus('Objekt joondatud lähima seina äärde');
+  } else {
+    setStatus('Läheduses ei leitud sobivat seina');
+  }
+}
+
+function centerSelectedInRoom() {
+  if (!selected || !selected.userData?.movable) return;
+  const room = findContainingRoom(selected.position.x, selected.position.z, rooms);
+  if (room) {
+    selected.position.x = room.x;
+    selected.position.z = room.z;
+    syncProps();
+    clampSel();
+    pushHist();
+    refreshQuote();
+    runErgoCheck();
+    setStatus(`Objekt tsentreeritud ruumi: ${room.name || 'Ruum'}`);
+  } else {
+    setStatus('Objekt ei asu ühegi tuvastatud ruumi piirides');
+  }
+}
+
 function rotateSelected90() {
-  if (!sel || !sel.userData?.movable) return;
-  sel.rotation.y = (sel.rotation.y + Math.PI / 2) % (Math.PI * 2);
+  if (!selected || !selected.userData?.movable) return;
+  selected.rotation.y = (selected.rotation.y + Math.PI / 2) % (Math.PI * 2);
   syncProps();
   clampSel();
   pushHist();
+  runErgoCheck();
   setStatus('Pööratud 90°');
 }
 
 function cloneSelected() {
-  if (!sel || !sel.userData?.movable) return;
-  const kind = sel.userData.kind;
-  const type = sel.userData.type;
+  if (!selected || !selected.userData?.movable) return;
+  const type = selected.userData.type;
   if (!type) return;
-  const newObj = addAsset(type, sel.position.x + 0.6, sel.position.z + 0.6);
+  const newObj = addAsset(type, selected.position.x + 0.6, selected.position.z + 0.6);
   if (newObj) {
-    newObj.rotation.y = sel.rotation.y;
-    newObj.scale.copy(sel.scale);
+    newObj.rotation.y = selected.rotation.y;
+    newObj.scale.copy(selected.scale);
     select(newObj);
     pushHist();
     refreshList();
     refreshQuote();
+    runErgoCheck();
     setStatus('Loodud koopia elemendist');
   }
 }
 
 function groundSelected() {
-  if (!sel || !sel.userData?.movable) return;
-  // Kui objekt on põranda kohal toas, joonda põrandapinnale (FLOOR_Y), muidu maapinnale (0)
-  sel.position.y = 0;
+  if (!selected || !selected.userData?.movable) return;
+  selected.position.y = 0;
   syncProps();
   clampSel();
   pushHist();
@@ -1787,20 +2036,23 @@ function groundSelected() {
 }
 
 function deleteSelected() {
-  if (!sel) return;
-  if (sel.userData?.movable) {
-    const parent = sel.parent;
-    if (parent) parent.remove(sel);
+  if (!selected) return;
+  if (selected.userData?.movable) {
+    const parent = selected.parent;
+    if (parent) parent.remove(selected);
     deselect();
     pushHist();
     refreshList();
     refreshQuote();
+    runErgoCheck();
     setStatus('Objekt kustutatud');
-  } else if (sel.userData?.wall) {
-    deleteWall(sel.userData.wall.id);
+  } else if (selected.userData?.wall) {
+    deleteWall(selected.userData.wall.id);
   }
 }
 
+document.getElementById('btn-sel-snap-wall')?.addEventListener('click', snapSelectedToWall);
+document.getElementById('btn-sel-center')?.addEventListener('click', centerSelectedInRoom);
 document.getElementById('btn-sel-rotate')?.addEventListener('click', rotateSelected90);
 document.getElementById('btn-sel-clone')?.addEventListener('click', cloneSelected);
 document.getElementById('btn-sel-ground')?.addEventListener('click', groundSelected);
@@ -2275,29 +2527,306 @@ document.getElementById('template-select')?.addEventListener('change', e => {
   e.target.value = '';
 });
 
-// Kataloogi tabid
-document.getElementById('tab-build')?.addEventListener('click', () => {
+// Kataloogi tabid ja sektsioonide vahetamine
+function switchSidebarTab(tabKey) {
   document.querySelectorAll('.catalog-tabs button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-build').classList.add('active');
-  document.getElementById('section-build-tools')?.classList.remove('hidden');
-  renderCatalog('', 'Ehitus');
+  document.getElementById(`tab-${tabKey}`)?.classList.add('active');
+
+  const secRooms = document.getElementById('section-rooms');
+  const secBuild = document.getElementById('section-build-tools');
+  const secStyles = document.getElementById('section-styles');
+  const secLibrary = document.querySelector('.library-section');
+  const detTrace = document.getElementById('details-trace');
+
+  if (secRooms) secRooms.classList.toggle('hidden', tabKey !== 'rooms');
+  if (secBuild) secBuild.classList.toggle('hidden', tabKey !== 'build');
+  if (secStyles) secStyles.classList.toggle('hidden', tabKey !== 'style');
+
+  // Kataloogi raamatukogu nähtavus
+  const isLibraryTab = tabKey === 'build' || tabKey === 'furnish' || tabKey === 'garden';
+  if (secLibrary) secLibrary.classList.toggle('hidden', !isLibraryTab);
+
+  if (tabKey === 'rooms') {
+    renderRoomModules();
+  } else if (tabKey === 'style') {
+    renderDesignStyles();
+  } else if (tabKey === 'build') {
+    renderCatalog('', 'Ehitus');
+  } else if (tabKey === 'furnish') {
+    renderCatalog('', 'Tubane');
+  } else if (tabKey === 'garden') {
+    renderCatalog('', 'Haljastus');
+  } else if (tabKey === 'trace') {
+    detTrace?.removeAttribute('hidden');
+    detTrace?.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+document.getElementById('tab-rooms')?.addEventListener('click', () => switchSidebarTab('rooms'));
+document.getElementById('tab-build')?.addEventListener('click', () => switchSidebarTab('build'));
+document.getElementById('tab-furnish')?.addEventListener('click', () => switchSidebarTab('furnish'));
+document.getElementById('tab-style')?.addEventListener('click', () => switchSidebarTab('style'));
+document.getElementById('tab-garden')?.addEventListener('click', () => switchSidebarTab('garden'));
+document.getElementById('tab-trace')?.addEventListener('click', () => switchSidebarTab('trace'));
+
+// ---- ARHITEKTUURSED RUUMIMOODULID (KIIRRUUMID) ----
+function renderRoomModules() {
+  const container = document.getElementById('room-modules-gallery');
+  if (!container) return;
+  container.innerHTML = Object.entries(ROOM_MODULES).map(([key, m]) => `
+    <div class="room-module-card" data-room-key="${key}">
+      <div class="room-module-header">
+        <span class="room-module-icon">${m.icon}</span>
+        <div class="room-module-titles">
+          <h4>${m.name}</h4>
+          <span class="room-module-meta">${m.width} × ${m.depth} m · ${(m.width * m.depth).toFixed(1)} m²</span>
+        </div>
+      </div>
+      <p class="room-module-desc">${m.desc}</p>
+      <div class="room-module-furniture-tags">
+        ${m.furniture.map(f => `<span class="room-module-tag">${f.type}</span>`).join('')}
+      </div>
+      <button type="button" class="btn-place-room" data-module="${key}">＋ Lisa plaanile</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.btn-place-room').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.module;
+      placeRoomModule(key);
+    };
+  });
+}
+
+function placeRoomModule(moduleKey) {
+  const modDef = ROOM_MODULES[moduleKey];
+  if (!modDef) return;
+
+  const mode = document.getElementById('room-placement-mode')?.value || 'center';
+  let ox = controls.target.x, oz = controls.target.z;
+
+  if (mode === 'center') {
+    ox = L / 2 + 1;
+    oz = W / 2;
+  } else if (mode === 'next') {
+    // Kui seinu juba on, leia parempoolne vaba ala
+    if (walls.length) {
+      let maxX = -Infinity, avgZ = 0;
+      walls.forEach(w => {
+        maxX = Math.max(maxX, w.x1, w.x2);
+        avgZ += (w.z1 + w.z2) / 2;
+      });
+      avgZ /= walls.length;
+      ox = maxX + modDef.width / 2 + 0.8;
+      oz = avgZ;
+    }
+  }
+
+  // Ehita ruumi seinad, uksed, aknad ja sisustus
+  const built = buildRoomModule(modDef, ox, oz);
+
+  // Lisa seinad
+  built.walls.forEach(w => {
+    walls.push(w);
+    rebuildWallMesh(w);
+  });
+
+  // Lisa ruumi põrand
+  rooms.push(built.room);
+
+  // Lisa sisustusesemed kataloogist
+  built.furniture.forEach(item => {
+    const o = addAsset(item.catalogKey, item.x, item.z, item.rotY || 0, item.scale || 1);
+    if (o && item.mat) {
+      // rakenda mööblile spetsiifiline viimistlus kui vaja
+      o.userData.customMat = item.mat;
+    }
+  });
+
+  rebuildAllWalls();
+  updatePlotCompliance();
+  pushHist();
+  refreshList();
+  refreshQuote();
+  runErgoCheck();
+  setStatus(`Lisatud ruumilahendus: ${modDef.name} (${(modDef.width * modDef.depth).toFixed(1)} m²)`);
+}
+
+// Kohandatud ristkülikruumi loomine
+document.getElementById('btn-create-custom-room')?.addEventListener('click', () => {
+  const wVal = THREE.MathUtils.clamp(parseFloat(document.getElementById('custom-room-w')?.value) || 5.0, 2, 25);
+  const dVal = THREE.MathUtils.clamp(parseFloat(document.getElementById('custom-room-d')?.value) || 4.0, 2, 25);
+  const floorMat = document.getElementById('custom-room-floor')?.value || 'parquet';
+
+  const ox = controls.target.x;
+  const oz = controls.target.z;
+  const hW = wVal / 2, hD = dVal / 2;
+  const h = 2.6, t = 0.22;
+
+  const w1 = { id: uid(), x1: ox - hW, z1: oz - hD, x2: ox + hW, z2: oz - hD, h, t, mat: 'wood', openings: [{ type: 'window', along: hW, width: 1.4, height: 1.3, sill: 0.85 }] };
+  const w2 = { id: uid(), x1: ox + hW, z1: oz - hD, x2: ox + hW, z2: oz + hD, h, t, mat: 'wood', openings: [] };
+  const w3 = { id: uid(), x1: ox + hW, z1: oz + hD, x2: ox - hW, z2: oz + hD, h, t, mat: 'wood', openings: [{ type: 'door', along: hW, width: 0.9, height: 2.1 }] };
+  const w4 = { id: uid(), x1: ox - hW, z1: oz + hD, x2: ox - hW, z2: oz - hD, h, t, mat: 'wood', openings: [] };
+
+  [w1, w2, w3, w4].forEach(w => {
+    walls.push(w);
+    rebuildWallMesh(w);
+  });
+
+  const area = +(wVal * dVal).toFixed(2);
+  rooms.push({
+    id: uid(),
+    name: `Tuba (${area.toFixed(1).replace('.', ',')} m²)`,
+    x: +ox.toFixed(2),
+    z: +oz.toFixed(2),
+    area,
+    floorMat,
+  });
+
+  rebuildAllWalls();
+  updatePlotCompliance();
+  pushHist();
+  refreshList();
+  refreshQuote();
+  runErgoCheck();
+  setStatus(`Loodud ruum: ${wVal} × ${dVal} m (${area} m²)`);
 });
-document.getElementById('tab-garden')?.addEventListener('click', () => {
-  document.querySelectorAll('.catalog-tabs button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-garden').classList.add('active');
-  document.getElementById('section-build-tools')?.classList.add('hidden');
-  renderCatalog('', 'Haljastus');
+
+// ---- HARMOONILISED DISAINISTIILID JA PALETID ----
+function renderDesignStyles() {
+  const container = document.getElementById('design-styles-list');
+  if (!container) return;
+
+  container.innerHTML = Object.entries(DESIGN_STYLES).map(([key, s]) => `
+    <div class="design-style-card" data-style-key="${key}">
+      <div class="design-style-head">
+        <h4>${s.title}</h4>
+        <div class="style-palette-preview">
+          <span class="style-swatch" style="background:${s.palette.wallColor}" title="Seinatoon"></span>
+          <span class="style-swatch" style="background:${s.palette.floorColor}" title="Põrand"></span>
+          <span class="style-swatch" style="background:${s.palette.trimColor}" title="Liistud / Trim"></span>
+          <span class="style-swatch" style="background:${s.palette.accentColor}" title="Aktsent"></span>
+        </div>
+      </div>
+      <p class="design-style-desc">${s.desc}</p>
+      <div class="design-style-features">
+        ${s.features.map(f => `<span class="style-feature-chip">✓ ${f}</span>`).join('')}
+      </div>
+      <div class="style-apply-row">
+        <button type="button" class="btn-apply-style-all" data-style="${key}">Rakenda tervele majale</button>
+        <button type="button" class="btn-apply-style-room" data-style="${key}">Valitud ruumile</button>
+      </div>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.btn-apply-style-all').forEach(b => {
+    b.onclick = () => applyDesignStyle(b.dataset.style, 'all');
+  });
+  container.querySelectorAll('.btn-apply-style-room').forEach(b => {
+    b.onclick = () => applyDesignStyle(b.dataset.style, 'room');
+  });
+}
+
+function applyDesignStyle(styleKey, scope = 'all') {
+  const style = DESIGN_STYLES[styleKey];
+  if (!style) return;
+
+  if (scope === 'all') {
+    walls.forEach(w => { w.mat = style.wallMat; });
+    rooms.forEach(r => { r.floorMat = style.floorMat; });
+    roofConfig.material = style.roofMat;
+    const roofSel = document.getElementById('roof-material-select');
+    if (roofSel) roofSel.value = style.roofMat;
+
+    rebuildAllWalls();
+    pushHist();
+    refreshQuote();
+    setStatus(`Rakendatud disainistiil "${style.title}" kogu hoonele`);
+  } else if (scope === 'room') {
+    let targetRoom = null;
+    if (selected && selected.userData.kind === 'room') {
+      targetRoom = rooms.find(r => r.id === selected.userData.roomId);
+    } else if (selected && selected.userData.movable) {
+      targetRoom = findContainingRoom(selected.position.x, selected.position.z, rooms);
+    } else if (rooms.length > 0) {
+      targetRoom = rooms[0];
+    }
+
+    if (targetRoom) {
+      targetRoom.floorMat = style.floorMat;
+      rebuildRooms();
+      pushHist();
+      setStatus(`Rakendatud "${style.title}" ruumile: ${targetRoom.name}`);
+    } else {
+      setStatus('Vali esmalt ruum või mööbliese ruumis');
+    }
+  }
+}
+
+// ---- ERGONOOMIKA & LIIKUMISTEEDE ANALÜÜSI MOOTOR ----
+let ergoGuidesEnabled = true;
+
+function runErgoCheck() {
+  const result = analyzeErgonomics(walls, rooms, allEditable());
+  const badge = document.getElementById('ergo-badge');
+  const badgeText = document.getElementById('ergo-text');
+
+  if (badge && badgeText) {
+    badge.className = `ergo-badge ${result.badgeStatus}`;
+    badgeText.textContent = `Ergonoomika: ${result.badgeStatus === 'good' ? 'Suurepärane' : result.badgeStatus === 'warn' ? '1 kitsaskoht' : 'Tähelepanu!'}`;
+  }
+
+  // Uuenda modaalakna sisu
+  const summaryStrip = document.getElementById('ergo-modal-summary');
+  const modalTitle = document.getElementById('ergo-modal-title');
+  const modalDesc = document.getElementById('ergo-modal-desc');
+  const statDoors = document.getElementById('ergo-stat-doors');
+  const statClearance = document.getElementById('ergo-stat-clearance');
+  const statItems = document.getElementById('ergo-stat-items');
+  const issuesList = document.getElementById('ergo-issues-list');
+
+  if (summaryStrip) summaryStrip.className = `ergo-summary-strip ${result.badgeStatus}`;
+  if (modalTitle) modalTitle.textContent = result.badgeStatus === 'good' ? 'Ergonoomika: Suurepärane' : result.badgeStatus === 'warn' ? 'Ergonoomika: Väikesed kitsaskohad' : 'Ergonoomika: Vajab tähelepanu';
+  if (modalDesc) modalDesc.textContent = result.summary;
+  if (statDoors) statDoors.textContent = `${result.stats.doorClearanceRatio}% vaba`;
+  if (statClearance) statClearance.textContent = `${result.stats.minClearanceM} m`;
+  if (statItems) statItems.textContent = `${result.stats.totalItems} tk`;
+
+  if (issuesList) {
+    if (!result.issues || result.issues.length === 0) {
+      issuesList.innerHTML = '<p class="muted" style="font-size:0.82rem; margin:0.4rem 0;">Plaanil ei leitud ühtegi kriitilist uste blokeeringut ega ergonoomilist konflikti.</p>';
+    } else {
+      issuesList.innerHTML = result.issues.map(iss => `
+        <div class="ergo-issue-item ${iss.type}">
+          <span class="ergo-issue-icon">${iss.type === 'blocked_door' ? '🚪⚠️' : '🚶⚠️'}</span>
+          <div>
+            <strong>${iss.title}</strong>
+            <p>${iss.desc}</p>
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
+  return result;
+}
+
+// Ergonoomika nupu ja modaali sündmused
+document.getElementById('ergo-badge')?.addEventListener('click', () => {
+  runErgoCheck();
+  document.getElementById('modal-ergo')?.classList.remove('hidden');
 });
-document.getElementById('tab-furnish')?.addEventListener('click', () => {
-  document.querySelectorAll('.catalog-tabs button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-furnish').classList.add('active');
-  document.getElementById('section-build-tools')?.classList.add('hidden');
-  renderCatalog('', 'Tubane');
+document.getElementById('btn-ergo')?.addEventListener('click', e => {
+  ergoGuidesEnabled = !ergoGuidesEnabled;
+  document.getElementById('btn-ergo')?.classList.toggle('active', ergoGuidesEnabled);
+  runErgoCheck();
+  setStatus(ergoGuidesEnabled ? 'Ergonoomika ja liikumisruumi kontroll sisse lülitatud' : 'Ergonoomika juhised peidetud');
 });
-document.getElementById('tab-trace')?.addEventListener('click', () => {
-  document.querySelectorAll('.catalog-tabs button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-trace').classList.add('active');
-  document.getElementById('details-trace')?.scrollIntoView({ behavior: 'smooth' });
+document.getElementById('btn-ergo-close')?.addEventListener('click', () => {
+  document.getElementById('modal-ergo')?.classList.add('hidden');
+});
+document.getElementById('btn-ergo-close-2')?.addEventListener('click', () => {
+  document.getElementById('modal-ergo')?.classList.add('hidden');
 });
 
 // Ruumide tuvastus ja Arhitektuurne plaan / Blueprint eksport
@@ -3016,6 +3545,72 @@ document.getElementById('btn-sun')?.addEventListener('click', () => {
   setSunTime(currentSunIndex + 1);
 });
 
+// Sisevalgustite ja hubaste meeleolutulede lüliti
+let indoorLightsEnabled = true;
+document.getElementById('btn-indoor-lights')?.addEventListener('click', () => {
+  indoorLightsEnabled = !indoorLightsEnabled;
+  indoorLightsGroup.visible = indoorLightsEnabled;
+  document.getElementById('btn-indoor-lights')?.classList.toggle('active', indoorLightsEnabled);
+  setStatus(indoorLightsEnabled ? 'Hubased sisevalgustid sisse lülitatud (2700K)' : 'Sisevalgustid välja lülitatud');
+});
+
+// Fotorežiim (Kinematograafiline 35mm stuudio vaade pehmete kontaktvarjudega)
+let isPhotoMode = false;
+let savedCameraFov = 40;
+let savedCameraPos = null;
+
+function togglePhotoMode(enable) {
+  isPhotoMode = (enable !== undefined) ? enable : !isPhotoMode;
+  const btnPhoto = document.getElementById('btn-photo-mode');
+  const bar = document.getElementById('photo-mode-bar');
+  const hud = document.getElementById('hud');
+  const toolbar = document.getElementById('toolbar');
+
+  btnPhoto?.classList.toggle('active', isPhotoMode);
+  bar?.classList.toggle('hidden', !isPhotoMode);
+
+  if (isPhotoMode) {
+    savedCameraFov = cameraPersp.fov;
+    savedCameraPos = cameraPersp.position.clone();
+    cameraPersp.fov = 32; // 35mm-50mm kinolääts
+    cameraPersp.updateProjectionMatrix();
+
+    renderer.toneMappingExposure = 1.35; // Luksuslik valgustatus
+    transform.detach();
+    if (toolbar) toolbar.style.display = 'none';
+    setStatus('📸 Fotorežiim: 35mm kinokaader, kõrge valgustäpsus. Pildistamiseks vajuta "Pildista"');
+  } else {
+    cameraPersp.fov = savedCameraFov;
+    cameraPersp.updateProjectionMatrix();
+    renderer.toneMappingExposure = 1.15;
+    if (toolbar) toolbar.style.display = '';
+    setStatus('Fotorežiimist väljutud');
+  }
+}
+
+document.getElementById('btn-photo-mode')?.addEventListener('click', () => togglePhotoMode());
+document.getElementById('btn-photo-exit')?.addEventListener('click', () => togglePhotoMode(false));
+
+document.getElementById('btn-photo-capture')?.addEventListener('click', () => {
+  // Tee puhas kaader ilma abijoonteta
+  const gridWasVis = layers.grid.visible;
+  const dimsWasVis = layers.dims.visible;
+  layers.grid.visible = false;
+  layers.dims.visible = false;
+  renderer.render(scene, camera);
+
+  const dataUrl = canvas.toDataURL('image/png');
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  const projName = (document.getElementById('project-name')?.value || 'kodudisain').replace(/\s+/g, '-').toLowerCase();
+  a.download = `${projName}-render-${Date.now()}.png`;
+  a.click();
+
+  layers.grid.visible = gridWasVis;
+  layers.dims.visible = dimsWasVis;
+  setStatus('📷 Kõrge resolutsiooniga foto salvestatud PNG-failina!');
+});
+
 document.getElementById('btn-ortho')?.addEventListener('click', () => {
   orthoEnabled = !orthoEnabled;
   document.getElementById('btn-ortho')?.classList.toggle('active', orthoEnabled);
@@ -3151,6 +3746,33 @@ window.addEventListener('pointerup', () => {
 
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
+// Drag-and-drop mööbli ja kataloogi elementide paigutamine 3D stseeni
+canvas.addEventListener('dragover', e => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+canvas.addEventListener('drop', e => {
+  e.preventDefault();
+  const assetId = e.dataTransfer.getData('text/plain');
+  if (!assetId) return;
+
+  const groundPos = groundPoint(e);
+  if (!groundPos) return;
+
+  const snapped = snapPoint(groundPos.x, groundPos.z);
+  const o = addAsset(assetId, snapped.x, snapped.z);
+  if (o) {
+    select(o);
+    pushHist();
+    refreshList();
+    refreshQuote();
+    runErgoCheck();
+    const item = CATALOG.flatMap(c => c.items).find(i => i.id === assetId);
+    setStatus(`Lohistatud ja paigutatud: ${item?.name || assetId}`);
+  }
+});
+
 // Klaviatuuri kiirklahvid
 window.addEventListener('keydown', e => {
   if (e.target.matches('input,textarea,select')) return;
@@ -3161,7 +3783,7 @@ window.addEventListener('keydown', e => {
   }
   if (k === 'v') { setDrawMode(null); document.querySelector('[data-tool="select"]')?.click(); }
   if (k === 'g') { document.querySelector('[data-tool="move"]')?.click(); transform.setMode('translate'); }
-  if (k === 'r' && !drawMode && sel?.userData?.movable) { e.preventDefault(); rotateSelected90(); return; }
+  if (k === 'r' && !drawMode && selected?.userData?.movable) { e.preventDefault(); rotateSelected90(); return; }
   if (k === 'r') { document.querySelector('[data-tool="rotate"]')?.click(); transform.setMode('rotate'); }
   if (k === 's' && !e.ctrlKey) { document.querySelector('[data-tool="scale"]')?.click(); transform.setMode('scale'); }
   if (k === 'w' && !e.ctrlKey && !isWalking) setDrawMode(drawMode === 'wall' ? null : 'wall');
@@ -3195,10 +3817,13 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
-// Käivita saunamall vaikimisi
+// Käivita saunamall ja disainitööriistad vaikimisi
 placeSaunaTemplate();
 rebuildPlotMesh();
 updateCompassUi();
+renderRoomModules();
+renderDesignStyles();
+runErgoCheck();
 resize();
 
 // Põhirenderdus ja jalutuskäigu animatsioon

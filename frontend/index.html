@@ -331,6 +331,7 @@
             <button id="mode-2d" title="Pealtvaade 2D">2D</button>
             <button id="mode-blueprint" title="Arhitektuurne plaanivaade">Plaan</button>
             <button id="mode-walk" title="Jalutuskäik esimeses isikus (silmade kõrguselt 1.7 m)">🚶 Jaluta</button>
+            <button id="btn-photo-mode" title="Kinematograafiline stuudiorežiim & fotorealistlik renderdus">📸 Fotorežiim</button>
           </div>
         </div>
 
@@ -345,6 +346,7 @@
           <span class="hud-divider"></span>
           <button id="btn-roof" class="active" title="Lülita katuse nähtavust (vaata sisse või väljast)">🏠 Katus</button>
           <button id="btn-sun" title="Päevaaja ja päikesevalguse tsükkel (Hommik / Lõuna / Õhtu / Kuldne tund / Öö)">☀️ Päevaaeg</button>
+          <button id="btn-indoor-lights" class="active" title="Sisevalgustite ja hubaste meeleolutulede lüliti">💡 Tuled</button>
           <span class="hud-divider"></span>
           <select id="snap-grid-select" title="Ruudustiku samm (Snap-to-Grid)" class="hud-select" aria-label="Ruudustiku samm">
             <option value="0.1">0.1 m</option>
@@ -399,6 +401,18 @@
           <div class="walk-help-card">
             <strong>🚶 Jalutuskäigu režiim (1.7 m silmade kõrgus)</strong>
             <span>Liigu: <b>W, A, S, D</b> · Pööra vaadet: <b>Lohista hiirega</b> · Välju: <b>Vajuta ESC või 3D nuppu</b></span>
+          </div>
+        </div>
+
+        <!-- FOTOREŽIIMI & KINEMATOGRAAFILINE HUD -->
+        <div id="photo-mode-bar" class="hidden photo-mode-bar">
+          <div class="photo-mode-info">
+            <strong>📸 Stuudio Fotorežiim</strong>
+            <small>Pehmed kontaktvarjud, 35mm fookuskaugus ja puhas esitluskaader</small>
+          </div>
+          <div class="photo-mode-actions">
+            <button id="btn-photo-capture" class="primary" title="Salvesta kõrge resolutsiooniga stuudiofoto">📷 Pildista (PNG)</button>
+            <button id="btn-photo-exit" class="quiet-btn" title="Välju fotorežiimist">Sulge</button>
           </div>
         </div>
 
@@ -495,6 +509,41 @@
                   <option value="paver">Unikivi sillutis</option>
                 </select>
               </label>
+            </div>
+
+            <!-- MÖÖBLI & POLSTRI VIIMISTLUS -->
+            <div id="props-furniture-finish" class="hidden wide property-subgrid">
+              <label class="wide">Mööbli viimistlus & tekstiil
+                <select id="p-furniture-finish">
+                  <optgroup label="Tekstiilid & Nahad">
+                    <option value="fabric_boucle">Põhjamaine hele Bouclé (pehme vill)</option>
+                    <option value="fabric_warm">Soe linane beež</option>
+                    <option value="fabric_gray">Klassikaline grafiithall tekstiil</option>
+                    <option value="fabric_navy">Sügav öösinine kangas</option>
+                    <option value="leather_cognac">Konjaki tooni naturaalnahk</option>
+                  </optgroup>
+                  <optgroup label="Puiduliigid & Spoon">
+                    <option value="wood_light">Naturaalne hele tamm</option>
+                    <option value="wood_walnut">Soe väärikas pähkel</option>
+                    <option value="wood_dark">Tume suitsutamm</option>
+                  </optgroup>
+                  <optgroup label="Metall & Keraamika">
+                    <option value="metal_black">Matt must pulbervärvitud teras</option>
+                    <option value="metal_brass">Harjatud soe messing / kuld</option>
+                    <option value="ceramic_white">Valge matt keraamika</option>
+                    <option value="terracotta">Soe savi / terrakota</option>
+                  </optgroup>
+                </select>
+              </label>
+              <div class="finish-swatches-row wide" id="finish-swatches-row">
+                <button type="button" class="swatch-btn" data-finish="fabric_boucle" title="Hele Bouclé" style="background:#f4f1ea;"></button>
+                <button type="button" class="swatch-btn" data-finish="fabric_warm" title="Linane beež" style="background:#d8c8b4;"></button>
+                <button type="button" class="swatch-btn" data-finish="leather_cognac" title="Konjaki nahk" style="background:#874c27;"></button>
+                <button type="button" class="swatch-btn" data-finish="wood_light" title="Hele tamm" style="background:#c9a173;"></button>
+                <button type="button" class="swatch-btn" data-finish="wood_walnut" title="Pähkel" style="background:#4c3528;"></button>
+                <button type="button" class="swatch-btn" data-finish="metal_brass" title="Messing" style="background:#d4af37;"></button>
+                <button type="button" class="swatch-btn" data-finish="metal_black" title="Must metall" style="background:#2c3036;"></button>
+              </div>
             </div>
 
             <!-- RUUMILINE ERGONOOMIKA & ASUKOHT -->
