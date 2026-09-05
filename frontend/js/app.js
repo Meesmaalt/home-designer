@@ -61,58 +61,12 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 
+// Pehme taeva ja keskkonnavalguse gradient
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x84bfe6);
 scene.fog = new THREE.FogExp2(0xb2d6ee, 0.009);
 
-// Blender-sarnane pehme fotorealistlik stuudio- ja taevakeskkond (PMREM reflection map)
-function createStudioEnvironment(wRenderer) {
-  const pmremGenerator = new THREE.PMREMGenerator(wRenderer);
-  pmremGenerator.compileEquirectangularShader();
-
-  const c = document.createElement('canvas');
-  c.width = 512;
-  c.height = 256;
-  const ctx = c.getContext('2d');
-
-  // Taeva ja maapinna sujuv pehme peegeldusgradient
-  const grad = ctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0.0, '#a5d0ec'); // Seniit
-  grad.addColorStop(0.42, '#eef6fc'); // Silmapiiri hele taevas
-  grad.addColorStop(0.50, '#f2ece4'); // Maapinna soe valguspeegeldus
-  grad.addColorStop(0.68, '#82937e'); // Haljastus / muru peegeldus
-  grad.addColorStop(1.0, '#3e4839'); // Sügav maapind
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 256);
-
-  // Pehme päikeseläige keskkonnas
-  const sunX = 512 * 0.35, sunY = 256 * 0.28;
-  const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 80);
-  sunGrad.addColorStop(0, 'rgba(255, 255, 250, 1.0)');
-  sunGrad.addColorStop(0.3, 'rgba(255, 248, 230, 0.65)');
-  sunGrad.addColorStop(1, 'rgba(255, 240, 210, 0)');
-  ctx.fillStyle = sunGrad;
-  ctx.beginPath();
-  ctx.arc(sunX, sunY, 80, 0, Math.PI * 2);
-  ctx.fill();
-
-  const texture = new THREE.CanvasTexture(c);
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-  pmremGenerator.dispose();
-  texture.dispose();
-  return envMap;
-}
-
-try {
-  scene.environment = createStudioEnvironment(renderer);
-  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.85;
-} catch (e) {
-  console.warn('Environment map initialization deferred:', e);
-}
-
-const cameraPersp = new THREE.PerspectiveCamera(40, 2, 0.18, 150);
+const cameraPersp = new THREE.PerspectiveCamera(40, 2, 0.2, 200);
 cameraPersp.position.set(L / 2 - 3, 16, W / 2 + 13);
 const cameraOrtho = new THREE.OrthographicCamera(-16, 16, 16, -16, 0.5, 120);
 cameraOrtho.position.set(L / 2 + 2, 45, W / 2);
@@ -2576,15 +2530,15 @@ function renderRoomModules() {
   container.innerHTML = Object.entries(ROOM_MODULES).map(([key, m]) => `
     <div class="room-module-card" data-room-key="${key}">
       <div class="room-module-header">
-        <span class="room-module-icon">${m.icon}</span>
+        <span class="room-module-icon">${m.icon || '🏠'}</span>
         <div class="room-module-titles">
-          <h4>${m.name}</h4>
+          <h4>${m.name || key}</h4>
           <span class="room-module-meta">${m.width} × ${m.depth} m · ${(m.width * m.depth).toFixed(1)} m²</span>
         </div>
       </div>
-      <p class="room-module-desc">${m.desc}</p>
+      <p class="room-module-desc">${m.desc || ''}</p>
       <div class="room-module-furniture-tags">
-        ${m.furniture.map(f => `<span class="room-module-tag">${f.type}</span>`).join('')}
+        ${(m.items || m.furniture || []).map(f => `<span class="room-module-tag">${f.type || f.catalogKey || 'ese'}</span>`).join('')}
       </div>
       <button type="button" class="btn-place-room" data-module="${key}">＋ Lisa plaanile</button>
     </div>
@@ -2623,20 +2577,24 @@ function placeRoomModule(moduleKey) {
   }
 
   // Ehita ruumi seinad, uksed, aknad ja sisustus
-  const built = buildRoomModule(modDef, ox, oz);
+  const built = buildRoomModule(moduleKey, ox, oz);
+  if (!built) return;
 
   // Lisa seinad
-  built.walls.forEach(w => {
+  (built.walls || []).forEach(w => {
     walls.push(w);
     rebuildWallMesh(w);
   });
 
   // Lisa ruumi põrand
-  rooms.push(built.room);
+  if (built.room) {
+    rooms.push(built.room);
+  }
 
   // Lisa sisustusesemed kataloogist
-  built.furniture.forEach(item => {
-    const o = addAsset(item.catalogKey, item.x, item.z, item.rotY || 0, item.scale || 1);
+  (built.items || built.furniture || []).forEach(item => {
+    const assetKey = item.type || item.catalogKey;
+    const o = addAsset(assetKey, item.x, item.z, item.rotY || item.ry || 0, item.scale || item.s || 1);
     if (o && item.mat) {
       // rakenda mööblile spetsiifiline viimistlus kui vaja
       o.userData.customMat = item.mat;
@@ -2697,27 +2655,34 @@ function renderDesignStyles() {
   const container = document.getElementById('design-styles-list');
   if (!container) return;
 
-  container.innerHTML = Object.entries(DESIGN_STYLES).map(([key, s]) => `
+  container.innerHTML = Object.entries(DESIGN_STYLES).map(([key, s]) => {
+    const swatches = s.swatches || [s.accentColor || '#176b52', '#f8fafc', '#767c85', '#b5824c'];
+    const title = s.name || s.title || key;
+    const features = s.features || [
+      `Seinad: ${s.wallMat || 'krohv'}`,
+      `Põrand: ${s.floorMat || 'parkett'}`,
+      `Katus: ${s.roofMat || 'tume plekk'}`
+    ];
+
+    return `
     <div class="design-style-card" data-style-key="${key}">
       <div class="design-style-head">
-        <h4>${s.title}</h4>
+        <h4>${s.icon || '🎨'} ${title}</h4>
         <div class="style-palette-preview">
-          <span class="style-swatch" style="background:${s.palette.wallColor}" title="Seinatoon"></span>
-          <span class="style-swatch" style="background:${s.palette.floorColor}" title="Põrand"></span>
-          <span class="style-swatch" style="background:${s.palette.trimColor}" title="Liistud / Trim"></span>
-          <span class="style-swatch" style="background:${s.palette.accentColor}" title="Aktsent"></span>
+          ${swatches.slice(0, 4).map(c => `<span class="style-swatch" style="background:${c}"></span>`).join('')}
         </div>
       </div>
-      <p class="design-style-desc">${s.desc}</p>
+      <p class="design-style-desc">${s.desc || ''}</p>
       <div class="design-style-features">
-        ${s.features.map(f => `<span class="style-feature-chip">✓ ${f}</span>`).join('')}
+        ${features.map(f => `<span class="style-feature-chip">✓ ${f}</span>`).join('')}
       </div>
       <div class="style-apply-row">
         <button type="button" class="btn-apply-style-all" data-style="${key}">Rakenda tervele majale</button>
         <button type="button" class="btn-apply-style-room" data-style="${key}">Valitud ruumile</button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   container.querySelectorAll('.btn-apply-style-all').forEach(b => {
     b.onclick = () => applyDesignStyle(b.dataset.style, 'all');
@@ -2730,6 +2695,7 @@ function renderDesignStyles() {
 function applyDesignStyle(styleKey, scope = 'all') {
   const style = DESIGN_STYLES[styleKey];
   if (!style) return;
+  const styleTitle = style.name || style.title || styleKey;
 
   if (scope === 'all') {
     walls.forEach(w => { w.mat = style.wallMat; });
@@ -2741,7 +2707,7 @@ function applyDesignStyle(styleKey, scope = 'all') {
     rebuildAllWalls();
     pushHist();
     refreshQuote();
-    setStatus(`Rakendatud disainistiil "${style.title}" kogu hoonele`);
+    setStatus(`Rakendatud disainistiil "${styleTitle}" kogu hoonele`);
   } else if (scope === 'room') {
     let targetRoom = null;
     if (selected && selected.userData.kind === 'room') {
@@ -2756,7 +2722,7 @@ function applyDesignStyle(styleKey, scope = 'all') {
       targetRoom.floorMat = style.floorMat;
       rebuildRooms();
       pushHist();
-      setStatus(`Rakendatud "${style.title}" ruumile: ${targetRoom.name}`);
+      setStatus(`Rakendatud "${styleTitle}" ruumile: ${targetRoom.name}`);
     } else {
       setStatus('Vali esmalt ruum või mööbliese ruumis');
     }
