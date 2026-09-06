@@ -104,6 +104,11 @@ const MAT = {
   carGlass: createMaterial(0x1a242f, { op: 0.75, r: 0.1 }),
   humanFig: createMaterial(0x616e7d, { r: 0.8 }),
   plasticGreen: createMaterial(0x2e7d32, { r: 0.4 }),
+  warmLedGlow: createMaterial(0xffbe66, { r: 0.2, emissive: 0xffaa33, emissiveIntensity: 1.2 }),
+  thermoWood: createMaterial(0x6b4428, { r: 0.6, map: getWoodPlankTexture(true) }),
+  blackMetal: createMaterial(0x1a1d22, { m: 0.8, r: 0.3 }),
+  charcoalConcrete: createMaterial(0x383d44, { r: 0.75, map: getPaverTexture() }),
+  glassWindguard: createMaterial(0xe8f4fa, { op: 0.35, side: THREE.DoubleSide, r: 0.05 }),
 };
 
 export const ASSET_BUILDERS = {
@@ -121,6 +126,178 @@ export const ASSET_BUILDERS = {
       g.add(box(3.96, 0.025, 0.085, MAT.woodLight, 0, 0.11, i * 0.1));
     }
     return mark(g, 'deckModule', 'scenery');
+  },
+  // --- MODERNNE DISAIN, INTEGREERITUD TERRASS & SPA ---
+  hotTubIntegrated: () => {
+    const g = new THREE.Group();
+    const deckW = 3.6, deckD = 3.6, deckH = 0.32;
+    // 1. Terrassi aluskarkass ja talastik
+    g.add(box(deckW, deckH - 0.04, deckD, MAT.woodDark, 0, (deckH - 0.04) / 2, 0));
+    // 2. Termotöödeldud laudis peal
+    for (let i = -17; i <= 17; i++) {
+      g.add(box(deckW - 0.02, 0.028, 0.088, MAT.thermoWood, 0, deckH, i * 0.1));
+    }
+    // 3. Süvistatud tünn terrassi sisse (ulatub üle laudise vaid 0.22m, ülejäänu on karkassi sees)
+    const tubR = 1.05, tubDepth = 0.95;
+    const tubMesh = cyl(tubR, tubR * 0.96, tubDepth, MAT.blackMetal, 0, deckH - tubDepth / 2 + 0.22, 0, 24);
+    g.add(tubMesh);
+    // 4. Puidust viimistletud ümbris / coping krae laudise tasapinnal
+    const coping = cyl(tubR + 0.12, tubR + 0.12, 0.04, MAT.woodLight, 0, deckH + 0.23, 0, 24);
+    g.add(coping);
+    // 5. Soe meeleolu-LED perimeetrirõngas ääre all
+    const ledRing = cyl(tubR + 0.06, tubR + 0.06, 0.03, MAT.warmLedGlow, 0, deckH + 0.20, 0, 24);
+    g.add(ledRing);
+    // 6. Realistlik selge helesinine vesi
+    const waterMesh = cyl(tubR - 0.04, tubR - 0.04, 0.05, MAT.water, 0, deckH + 0.16, 0, 24);
+    g.add(waterMesh);
+    // 7. Siseiste ringikujuliselt vee all
+    const innerSeat = cyl(tubR - 0.08, tubR - 0.08, 0.25, MAT.thermoWood, 0, deckH - 0.2, 0, 18);
+    g.add(innerSeat);
+    // 8. Roostevaba suitsutoru ja must kuumuskaitse
+    g.add(cyl(0.06, 0.06, 1.9, MAT.metal, tubR * 0.72, deckH + 0.95, tubR * 0.35, 12));
+    g.add(cyl(0.10, 0.10, 0.8, MAT.blackMetal, tubR * 0.72, deckH + 0.45, tubR * 0.35, 12));
+    // 9. Joogiriiul serval
+    g.add(box(0.4, 0.03, 0.18, MAT.woodLight, -tubR * 0.7, deckH + 0.26, -tubR * 0.5));
+    // 10. Lahedad madalad astmed terrassile tõusuks
+    g.add(box(1.6, 0.16, 0.5, MAT.thermoWood, 0, 0.08, deckD / 2 + 0.25));
+    return mark(g, 'hotTubIntegrated', 'scenery');
+  },
+  modernDeckWrap: () => {
+    const g = new THREE.Group();
+    const h = 0.24;
+    // Põhiosa sauna ees (laius 7.2m x sügavus 3.6m)
+    g.add(box(7.2, h, 3.6, MAT.woodDark, 0, h / 2, 0));
+    for (let i = -17; i <= 17; i++) {
+      g.add(box(7.16, 0.025, 0.088, MAT.thermoWood, 0, h + 0.012, i * 0.1));
+    }
+    // Külgmine tiib spa/tünnisauna tsoonile (laius 3.8m x sügavus 4.2m)
+    const sideX = 4.8, sideZ = 1.2;
+    g.add(box(3.8, h, 4.2, MAT.woodDark, sideX, h / 2, sideZ));
+    for (let i = -20; i <= 20; i++) {
+      g.add(box(3.76, 0.025, 0.088, MAT.thermoWood, sideX, h + 0.012, sideZ + i * 0.1));
+    }
+    // Süvistatud LED-valgusriba terrassi astmeserval
+    g.add(box(7.2, 0.02, 0.02, MAT.warmLedGlow, 0, 0.12, 1.82));
+    g.add(box(0.02, 0.02, 4.2, MAT.warmLedGlow, sideX + 1.92, 0.12, sideZ));
+    // Laiad sujuvad astmed murule
+    g.add(box(3.0, h * 0.5, 0.45, MAT.thermoWood, 0, h * 0.25, 2.05));
+    g.add(box(0.45, h * 0.5, 2.2, MAT.thermoWood, sideX + 2.15, h * 0.25, sideZ));
+    return mark(g, 'modernDeckWrap', 'scenery');
+  },
+  modernLounge: () => {
+    const g = new THREE.Group();
+    // L-kujuline madal modernne diivan
+    const baseH = 0.28, seatDepth = 0.85;
+    // Pikk osa
+    g.add(box(2.5, baseH, seatDepth, MAT.thermoWood, 0, baseH / 2, 0));
+    g.add(box(2.46, 0.12, seatDepth - 0.06, MAT.fabricWarm, 0, baseH + 0.06, 0));
+    g.add(box(2.46, 0.38, 0.15, MAT.fabricWarm, 0, baseH + 0.25, -seatDepth / 2 + 0.08));
+    // Lühike külgosa
+    g.add(box(seatDepth, baseH, 1.6, MAT.thermoWood, 1.25 - seatDepth / 2, baseH / 2, 0.8 + seatDepth / 2));
+    g.add(box(seatDepth - 0.06, 0.12, 1.56, MAT.fabricWarm, 1.25 - seatDepth / 2, baseH + 0.06, 0.8 + seatDepth / 2));
+    // Madal ruudukujuline puidust kohvilaud
+    g.add(box(0.85, 0.24, 0.85, MAT.thermoWood, -0.3, 0.12, 0.85));
+    g.add(box(0.82, 0.02, 0.82, MAT.charcoalConcrete, -0.3, 0.24, 0.85));
+    return mark(g, 'modernLounge', 'furniture');
+  },
+  modernFireTable: () => {
+    const g = new THREE.Group();
+    // Tume betoonist laud
+    g.add(box(1.35, 0.42, 0.72, MAT.charcoalConcrete, 0, 0.21, 0));
+    // Keskel põleti süvend mustade kividega
+    g.add(box(0.85, 0.04, 0.35, MAT.blackMetal, 0, 0.41, 0));
+    g.add(box(0.80, 0.03, 0.30, MAT.bark, 0, 0.42, 0));
+    // 4 karastatud klaasist tuulekaitset
+    g.add(box(0.86, 0.16, 0.015, MAT.glassWindguard, 0, 0.50, -0.19));
+    g.add(box(0.86, 0.16, 0.015, MAT.glassWindguard, 0, 0.50, 0.19));
+    g.add(box(0.015, 0.16, 0.38, MAT.glassWindguard, -0.43, 0.50, 0));
+    g.add(box(0.015, 0.16, 0.38, MAT.glassWindguard, 0.43, 0.50, 0));
+    // Hubased leegid
+    for (let x = -0.32; x <= 0.32; x += 0.16) {
+      g.add(cyl(0.04, 0.01, 0.14, MAT.fireOrange, x, 0.48, (Math.random() - 0.5) * 0.08, 6));
+    }
+    return mark(g, 'modernFireTable', 'scenery');
+  },
+  slatScreenModern: () => {
+    const g = new THREE.Group();
+    const w = 2.4, h = 1.85;
+    // Must minimalistlik terasraam
+    g.add(box(0.06, h, 0.06, MAT.blackMetal, -w / 2, h / 2, 0));
+    g.add(box(0.06, h, 0.06, MAT.blackMetal, w / 2, h / 2, 0));
+    g.add(box(w, 0.06, 0.06, MAT.blackMetal, 0, h, 0));
+    g.add(box(w, 0.06, 0.06, MAT.blackMetal, 0, 0.03, 0));
+    // Püstised termopuidust ribid ilusa vahega
+    const slatCount = 18;
+    const step = (w - 0.2) / (slatCount - 1);
+    for (let i = 0; i < slatCount; i++) {
+      const x = -w / 2 + 0.1 + i * step;
+      g.add(box(0.04, h - 0.08, 0.02, MAT.thermoWood, x, h / 2, 0));
+    }
+    return mark(g, 'slatScreenModern', 'scenery');
+  },
+  glassBalustrade: () => {
+    const g = new THREE.Group();
+    const w = 3.0, h = 1.05;
+    // Must alumine kinnitusprofiil
+    g.add(box(w, 0.08, 0.05, MAT.blackMetal, 0, 0.04, 0));
+    // Karastatud selge klaas
+    g.add(box(w - 0.02, h - 0.1, 0.015, MAT.glassWindguard, 0, (h - 0.1) / 2 + 0.08, 0));
+    // Minimalistlik must käsipuu peal
+    g.add(box(w, 0.035, 0.045, MAT.blackMetal, 0, h, 0));
+    return mark(g, 'glassBalustrade', 'scenery');
+  },
+  modernPergola: () => {
+    const g = new THREE.Group();
+    const w = 3.6, d = 3.2, h = 2.5;
+    // 4 musta saledat alumiiniumposti
+    [-w / 2 + 0.1, w / 2 - 0.1].forEach(x => {
+      [-d / 2 + 0.1, d / 2 - 0.1].forEach(z => {
+        g.add(box(0.1, h, 0.1, MAT.blackMetal, x, h / 2, z));
+      });
+    });
+    // Peatalad
+    g.add(box(w, 0.14, 0.08, MAT.blackMetal, 0, h - 0.07, -d / 2 + 0.1));
+    g.add(box(w, 0.14, 0.08, MAT.blackMetal, 0, h - 0.07, d / 2 - 0.1));
+    g.add(box(0.08, 0.14, d, MAT.blackMetal, -w / 2 + 0.1, h - 0.07, 0));
+    g.add(box(0.08, 0.14, d, MAT.blackMetal, w / 2 - 0.1, h - 0.07, 0));
+    // Saledad õhukesed lamellid
+    for (let x = -w / 2 + 0.25; x <= w / 2 - 0.25; x += 0.22) {
+      g.add(box(0.03, 0.08, d - 0.16, MAT.blackMetal, x, h - 0.04, 0));
+    }
+    return mark(g, 'modernPergola', 'scenery');
+  },
+  sunLoungerModern: () => {
+    const g = new THREE.Group();
+    // Must alumiiniumkarkass puidust liistudega
+    g.add(box(2.0, 0.24, 0.72, MAT.blackMetal, 0, 0.12, 0));
+    g.add(box(1.94, 0.02, 0.68, MAT.thermoWood, 0, 0.25, 0));
+    // Hele pehme ilmastikukindel madrats
+    g.add(box(1.3, 0.08, 0.64, MAT.fabricWarm, -0.3, 0.29, 0));
+    // Tõstetud seljatugi
+    const backMesh = box(0.62, 0.08, 0.64, MAT.fabricWarm, 0.62, 0.42, 0);
+    backMesh.rotation.z = -0.38;
+    g.add(backMesh);
+    return mark(g, 'sunLoungerModern', 'furniture');
+  },
+  modernBollard: () => {
+    const g = new THREE.Group();
+    const h = 0.72;
+    g.add(box(0.1, h, 0.1, MAT.blackMetal, 0, h / 2, 0));
+    // Varjatud süvendiga valguspea
+    g.add(box(0.08, 0.06, 0.08, MAT.warmLedGlow, 0, h - 0.08, 0));
+    g.add(box(0.12, 0.03, 0.12, MAT.blackMetal, 0, h, 0));
+    return mark(g, 'modernBollard', 'scenery');
+  },
+  modernHangingFireplace: () => {
+    const g = new THREE.Group();
+    // Laest laskuv suitsutoru
+    g.add(cyl(0.10, 0.10, 1.6, MAT.blackMetal, 0, 1.8, 0, 16));
+    // Rippuv ovaalne kaminakere
+    const hearth = cyl(0.48, 0.40, 0.55, MAT.blackMetal, 0, 0.78, 0, 20);
+    g.add(hearth);
+    // Kaminasuu avaus koos elava tulega
+    g.add(box(0.38, 0.22, 0.10, MAT.fireOrange, 0, 0.75, 0.32));
+    return mark(g, 'modernHangingFireplace', 'furniture');
   },
   pergola: () => {
     const g = new THREE.Group();

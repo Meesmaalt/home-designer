@@ -17,18 +17,21 @@ function createProceduralCanvas(width, height, drawFn) {
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
   return tex;
 }
 
 // 1. Murutekstuur (elav muruvaip peente toonide ja faktuuriga)
 export function getGrassTexture() {
   if (textureCache.has('grass')) return textureCache.get('grass');
-  const tex = createProceduralCanvas(256, 256, (ctx, w, h) => {
+  const tex = createProceduralCanvas(128, 128, (ctx, w, h) => {
     ctx.fillStyle = '#497e38';
     ctx.fillRect(0, 0, w, h);
 
-    // Orgaaniline rohumuster ja toonierinevused
-    for (let i = 0; i < 4000; i++) {
+    // Orgaaniline rohumuster ja toonierinevused (optimeeritud kiireks renderdamiseks)
+    for (let i = 0; i < 450; i++) {
       const x = Math.random() * w;
       const y = Math.random() * h;
       const len = 3 + Math.random() * 5;
@@ -49,10 +52,10 @@ export function getGrassTexture() {
     }
 
     // Peened varjulaigud
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 25; i++) {
       const cx = Math.random() * w;
       const cy = Math.random() * h;
-      const r = 4 + Math.random() * 12;
+      const r = 4 + Math.random() * 10;
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
       grad.addColorStop(0, 'rgba(38, 70, 28, 0.18)');
       grad.addColorStop(1, 'rgba(38, 70, 28, 0)');

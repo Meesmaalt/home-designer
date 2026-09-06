@@ -41,6 +41,20 @@ import {
   buildRoomModule,
   analyzeErgonomics,
 } from './design-tools.js';
+import { exportSceneToObj, exportSceneToGltf, triggerFileDownload } from './exporters.js';
+import { calculateBuildingEnergy, HEATING_SYSTEMS } from './energy.js';
+import {
+  calculateSolarPosition,
+  SEASONS,
+  startSunTimelapse,
+  stopSunTimelapse,
+  isSunTimelapseRunning,
+} from './sun-study.js';
+import {
+  buildTimberFramingModel,
+  disposeFramingGroup,
+  FRAMING_PRESETS,
+} from './framing.js';
 
 const L = SITE.sauna.L, W = SITE.sauna.W, H = SITE.sauna.H;
 const FRONT_D = SITE.sauna.FRONT_D, BACK_D = SITE.sauna.BACK_D;
@@ -52,7 +66,6 @@ const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: true,
   preserveDrawingBuffer: true,
-  logarithmicDepthBuffer: true,
   powerPreference: 'high-performance',
 });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
@@ -75,6 +88,102 @@ scene.fog = new THREE.FogExp2(0xb2d6ee, 0.009);
 // CAD dünaamilised mõõteliinid mööbli ja seinte vahel
 const clearanceDimsGroup = new THREE.Group();
 scene.add(clearanceDimsGroup);
+
+// Puitkarkassi (Timber Framing) ja kihtide insenerivaade
+let isFramingMode = false;
+const framingGroup = new THREE.Group();
+framingGroup.name = 'FramingGroup';
+scene.add(framingGroup);
+
+const framingOptions = {
+  mode: 'studs',
+  studSpacing: 0.60,
+  peelPercent: 50,
+  includeRoof: true,
+};
+
+function toggleFramingMode(forceState) {
+  isFramingMode = (forceState !== undefined) ? forceState : !isFramingMode;
+  
+  const topBtn = document.getElementById('btn-toggle-framing');
+  const hud = document.getElementById('framing-controller-hud');
+  
+  if (topBtn) topBtn.classList.toggle('active', isFramingMode);
+  if (hud) hud.classList.toggle('hidden', !isFramingMode);
+  
+  if (isFramingMode) {
+    wallMeshes.forEach(m => { m.visible = false; });
+    roofGroup.visible = false;
+    refreshFramingModel();
+    setStatus('Puitkarkassi ja seinakihtide insenerivaade aktiveeritud (600 mm C24)');
+  } else {
+    disposeFramingGroup(framingGroup);
+    wallMeshes.forEach(m => { m.visible = true; });
+    roofGroup.visible = (roofConfig.type !== 'none');
+    setStatus('Tavaline seinavaade taastatud');
+  }
+}
+
+function refreshFramingModel() {
+  if (!isFramingMode) return;
+  disposeFramingGroup(framingGroup);
+  const result = buildTimberFramingModel(walls, roofConfig, {
+    ...framingOptions,
+    floorY: FLOOR_Y,
+  });
+  framingGroup.add(result.group);
+  
+  const s = result.stats;
+  const stStuds = document.getElementById('f-stat-studs');
+  if (stStuds) stStuds.textContent = `${s.studCount} tk`;
+  const stTimber = document.getElementById('f-stat-timber');
+  if (stTimber) stTimber.textContent = `${s.linearMetersTimber} jm`;
+  const stVol = document.getElementById('f-stat-vol');
+  if (stVol) stVol.textContent = `${s.timberVolumeM3} m³`;
+  const stWool = document.getElementById('f-stat-wool');
+  if (stWool) stWool.textContent = `${s.insulationAreaM2} m²`;
+}
+
+function setupFramingController() {
+  document.getElementById('btn-toggle-framing')?.addEventListener('click', () => toggleFramingMode());
+  document.getElementById('btn-wall-toggle-framing')?.addEventListener('click', () => toggleFramingMode());
+  document.getElementById('btn-framing-close')?.addEventListener('click', () => toggleFramingMode(false));
+
+  document.querySelectorAll('.framing-mode-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.framing-mode-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      const mode = pill.dataset.fmode;
+      framingOptions.mode = mode;
+
+      const peelWrap = document.getElementById('framing-peel-wrap');
+      if (peelWrap) peelWrap.style.display = (mode === 'peel') ? 'flex' : 'none';
+
+      refreshFramingModel();
+      setStatus(`Karkassirežiim: ${pill.textContent}`);
+    });
+  });
+
+  const peelSlider = document.getElementById('framing-peel-slider');
+  const peelVal = document.getElementById('framing-peel-val');
+  peelSlider?.addEventListener('input', e => {
+    const val = +e.target.value;
+    framingOptions.peelPercent = val;
+    if (peelVal) peelVal.textContent = `${val}%`;
+    refreshFramingModel();
+  });
+
+  document.getElementById('framing-spacing-select')?.addEventListener('change', e => {
+    framingOptions.studSpacing = +e.target.value;
+    refreshFramingModel();
+    setStatus(`Karkassi sammuks määratud ${+e.target.value * 1000} mm`);
+  });
+
+  document.getElementById('framing-roof-toggle')?.addEventListener('change', e => {
+    framingOptions.includeRoof = e.target.checked;
+    refreshFramingModel();
+  });
+}
 
 // Mööbli automaatne seina-magnet (haakub seina äärde < 0.50m)
 let autoWallSnapEnabled = true;
@@ -100,6 +209,18 @@ transform.setTranslationSnap(0.1);
 transform.setRotationSnap(THREE.MathUtils.degToRad(15));
 transform.addEventListener('dragging-changed', e => {
   controls.enabled = !e.value && viewMode !== 'walk';
+  const angleTag = document.getElementById('gizmo-angle-tag');
+  if (transform.getMode() === 'rotate') {
+    if (e.value && selected) {
+      if (angleTag) {
+        angleTag.classList.remove('hidden');
+        const deg = ((Math.round(THREE.MathUtils.radToDeg(selected.rotation.y)) % 360) + 360) % 360;
+        angleTag.textContent = `📐 ${deg}°`;
+      }
+    } else {
+      if (angleTag) angleTag.classList.add('hidden');
+    }
+  }
   if (!e.value) {
     pushHist();
     refreshQuote();
@@ -109,6 +230,14 @@ transform.addEventListener('dragging-changed', e => {
 transform.addEventListener('objectChange', () => {
   syncProps();
   clampSel();
+  if (selected) {
+    const deg = ((Math.round(THREE.MathUtils.radToDeg(selected.rotation.y)) % 360) + 360) % 360;
+    updateGizmoAngleReadout(deg);
+    const angleTag = document.getElementById('gizmo-angle-tag');
+    if (angleTag && !angleTag.classList.contains('hidden')) {
+      angleTag.textContent = `📐 ${deg}°`;
+    }
+  }
   if (autoWallSnapEnabled && selected?.userData?.movable && selected.userData.kind !== 'wall' && selected.userData.kind !== 'room') {
     checkAutoWallSnap(selected);
   }
@@ -635,7 +764,9 @@ function rebuildWallMesh(w) {
   if (cursor < len - 0.02) segments.push({ a: cursor, b: len });
   if (!opens.length) segments.push({ a: 0, b: len });
 
-  // 1. Seinasektsioonide kihiline ehitus
+  const wallFinishMat = w.mat ? getWallFinishMaterial(w.mat) : (asmKey.includes('timber') ? MAT.wood : MAT.plaster);
+
+  // 1. Seinasektsioonide ehitus (optimeeritud monoliitne geomeetria ilma liigsete varjatud sisekihtideta)
   segments.forEach(seg => {
     const segLen = seg.b - seg.a;
     if (segLen < 0.02) return;
@@ -648,30 +779,18 @@ function rebuildWallMesh(w) {
       const socle = box(segLen, FLOOR_Y, socleThick, MAT.concrete, 0, FLOOR_Y / 2, 0);
       socle.position.set(cx, FLOOR_Y / 2, cz);
       socle.rotation.y = -angle;
+      socle.castShadow = false;
+      socle.receiveShadow = true;
       g.add(socle);
     }
 
-    let cumThick = 0;
-    const scaleRatio = t / (physics.totalM || t);
-    const numLayers = asm.layers.length;
-    asm.layers.forEach((l, lIdx) => {
-      const layerThick = (l.thickMm / 1000) * scaleRatio;
-      if (layerThick < 0.002) return;
-      let lMat = getLayerThreeMaterial(l.matId);
-      if (w.mat && (lIdx === 0 || lIdx === numLayers - 1 || numLayers === 1)) {
-        lMat = getWallFinishMaterial(w.mat);
-      }
-      const localOffset = -t / 2 + cumThick + layerThick / 2;
-      cumThick += layerThick;
-
-      const nx = -Math.sin(angle) * localOffset;
-      const nz = Math.cos(angle) * localOffset;
-
-      const mesh = box(segLen, h, layerThick, lMat, 0, h / 2, 0);
-      mesh.position.set(cx + nx, FLOOR_Y + h / 2, cz + nz);
-      mesh.rotation.y = -angle;
-      g.add(mesh);
-    });
+    // Puhas ja sujuv seinaplokk
+    const mesh = box(segLen, h, t, wallFinishMat, 0, h / 2, 0);
+    mesh.position.set(cx, FLOOR_Y + h / 2, cz);
+    mesh.rotation.y = -angle;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    g.add(mesh);
   });
 
   // 2. Avatäited (uksed, aknad) ja avade ümbrus
@@ -768,55 +887,25 @@ function rebuildWallMesh(w) {
       g.add(winGroup);
     }
 
-    // Seinaosa akna sillusel (akna all)
+    // Seinaosa akna sillusel (akna all - puhas monoliitne plokk)
     if (sill > 0.04) {
-      let cumBottomThick = 0;
-      const scaleRatio = t / (physics.totalM || t);
-      const numLayers = asm.layers.length;
-      asm.layers.forEach((l, lIdx) => {
-        const layerThick = (l.thickMm / 1000) * scaleRatio;
-        if (layerThick < 0.002) return;
-        let lMat = getLayerThreeMaterial(l.matId);
-        if (w.mat && (lIdx === 0 || lIdx === numLayers - 1 || numLayers === 1)) {
-          lMat = getWallFinishMaterial(w.mat);
-        }
-        const localOffset = -t / 2 + cumBottomThick + layerThick / 2;
-        cumBottomThick += layerThick;
-
-        const nx = -Math.sin(angle) * localOffset;
-        const nz = Math.cos(angle) * localOffset;
-
-        const btm = box(op.width + 0.02, sill, layerThick, lMat, 0, sill / 2, 0);
-        btm.position.set(ox + nx, FLOOR_Y + sill / 2, oz + nz);
-        btm.rotation.y = -angle;
-        g.add(btm);
-      });
+      const btm = box(op.width + 0.01, sill, t, wallFinishMat, 0, sill / 2, 0);
+      btm.position.set(ox, FLOOR_Y + sill / 2, oz);
+      btm.rotation.y = -angle;
+      btm.castShadow = true;
+      btm.receiveShadow = true;
+      g.add(btm);
     }
 
-    // Seinaosa ava kohal (sillis)
+    // Seinaosa ava kohal (sillus - puhas monoliitne plokk)
     const topH = h - (sill + oh);
     if (topH > 0.04) {
-      let cumTopThick = 0;
-      const scaleRatio = t / (physics.totalM || t);
-      const numLayers = asm.layers.length;
-      asm.layers.forEach((l, lIdx) => {
-        const layerThick = (l.thickMm / 1000) * scaleRatio;
-        if (layerThick < 0.002) return;
-        let lMat = getLayerThreeMaterial(l.matId);
-        if (w.mat && (lIdx === 0 || lIdx === numLayers - 1 || numLayers === 1)) {
-          lMat = getWallFinishMaterial(w.mat);
-        }
-        const localOffset = -t / 2 + cumTopThick + layerThick / 2;
-        cumTopThick += layerThick;
-
-        const nx = -Math.sin(angle) * localOffset;
-        const nz = Math.cos(angle) * localOffset;
-
-        const top = box(op.width + 0.02, topH, layerThick, lMat, 0, topH / 2, 0);
-        top.position.set(ox + nx, FLOOR_Y + sill + oh + topH / 2, oz + nz);
-        top.rotation.y = -angle;
-        g.add(top);
-      });
+      const top = box(op.width + 0.01, topH, t, wallFinishMat, 0, topH / 2, 0);
+      top.position.set(ox, FLOOR_Y + sill + oh + topH / 2, oz);
+      top.rotation.y = -angle;
+      top.castShadow = true;
+      top.receiveShadow = true;
+      g.add(top);
     }
   });
 
@@ -827,6 +916,9 @@ function rebuildWallMesh(w) {
       c.receiveShadow = true;
     }
   });
+  if (isFramingMode) {
+    g.visible = false;
+  }
   layers.building.add(g);
   wallMeshes.set(w.id, g);
   rebuildPlanSymbols();
@@ -840,6 +932,7 @@ function rebuildAllWalls() {
   rebuildRooms();
   rebuildRoof();
   refreshQuote();
+  if (isFramingMode) refreshFramingModel();
 }
 
 // Katuse 3D ehitamine hoone seinte peale
@@ -1090,7 +1183,7 @@ function rebuildRooms() {
   [...layers.building.children].filter(c => c.userData.roomFloor).forEach(c => layers.building.remove(c));
 
   rooms.forEach(r => {
-    // 1. Põranda 3D visuaal
+    // 1. Põranda 3D visuaal (kerge, sujuv ja ilma liigsete maa-aluste kihtideta)
     const floorKey = r.floorMat || 'parquet';
     const matConfig = MATERIALS[floorKey] || MATERIALS.parquet;
     let floorTex = null;
@@ -1109,41 +1202,20 @@ function rebuildRooms() {
     floorMesh.rotation.x = -Math.PI / 2;
     floorMesh.position.set(r.x, FLOOR_Y + 0.015, r.z);
     floorMesh.receiveShadow = true;
+    floorMesh.castShadow = false; // Põrandaplaat ei vaja iseenda peale varju heitmist
     floorMesh.userData.roomFloor = true;
     floorMesh.userData.roomId = r.id;
     layers.building.add(floorMesh);
 
-    // Vundamendi täitev alusplaat (täidab vahe maapinna ja põranda vahel)
+    // Vundamendi täitev alusplaat (täidab vahe maapinna ja põranda vahel, ilma varjukaardita)
     if (FLOOR_Y > 0.01) {
       const slabSub = box(rW, FLOOR_Y, rD, MAT.concrete, 0, FLOOR_Y / 2, 0);
       slabSub.position.set(r.x, FLOOR_Y / 2, r.z);
+      slabSub.castShadow = false;
+      slabSub.receiveShadow = true;
       slabSub.userData.roomFloor = true;
       slabSub.userData.roomId = r.id;
       layers.building.add(slabSub);
-    }
-
-    // 1b. Hubane soe sisevalgustus ruumile (Blender-sarnane pehme interjöörisära)
-    const lightRadius = Math.max(4.5, Math.max(rW, rD) * 1.4);
-    const roomLight = new THREE.PointLight(0xffebd2, 0.45, lightRadius, 2);
-    roomLight.position.set(r.x, FLOOR_Y + 2.1, r.z);
-    indoorLightsGroup.add(roomLight);
-
-    // 1b. Põranda aluskihtide 3D konstruktsioon (plaat, soojustus, killustik)
-    const fAsmKey = r.floorAssemblyKey || (r.floorMat === 'paver' ? 'terrace_paver_ground' : r.floorMat === 'tile_gray' ? 'ground_slab_tile' : 'ground_slab_heated');
-    const fAsm = r.floorAssembly || FLOOR_ASSEMBLIES[fAsmKey] || FLOOR_ASSEMBLIES.ground_slab_heated;
-    if (fAsm && fAsm.layers) {
-      let depthCursor = 0;
-      fAsm.layers.forEach(fl => {
-        const lThick = fl.thickMm / 1000;
-        if (lThick < 0.005) return;
-        const flMat = getLayerThreeMaterial(fl.matId);
-        const subMesh = box(rW - 0.02, lThick, rD - 0.02, flMat, 0, 0, 0);
-        subMesh.position.set(r.x, FLOOR_Y + 0.015 - depthCursor - lThick / 2, r.z);
-        subMesh.userData.roomFloor = true;
-        subMesh.userData.roomId = r.id;
-        layers.building.add(subMesh);
-        depthCursor += lThick;
-      });
     }
 
     // 2. Ruumi tekstisilt
@@ -1177,6 +1249,17 @@ function rebuildRooms() {
     layers.building.add(sp);
     roomSprites.set(r.id, sp);
   });
+
+  // 1b. Hubane ühtne soe sisevalgustus hoonele (1 kerge valgusallikas mitme raske punktvalgusti asemel)
+  if (rooms.length > 0) {
+    let avgX = 0, avgZ = 0;
+    rooms.forEach(r => { avgX += r.x; avgZ += r.z; });
+    avgX /= rooms.length;
+    avgZ /= rooms.length;
+    const buildingIndoorLight = new THREE.PointLight(0xffebd2, 0.45, 26, 1.5);
+    buildingIndoorLight.position.set(avgX, FLOOR_Y + 2.2, avgZ);
+    indoorLightsGroup.add(buildingIndoorLight);
+  }
   refreshRooms();
 }
 
@@ -1492,22 +1575,26 @@ function layerFor(kind) {
 function getPlacementY(type, x, z, kind) {
   // 1. Kontrolli, kas asub terrassimooduli kohal
   for (const child of layers.scenery.children) {
-    if (child.userData?.type === 'deckModule' && child.position) {
+    const t = child.userData?.type;
+    if ((t === 'deckModule' || t === 'modernDeckWrap' || t === 'hotTubIntegrated') && child.position) {
       const dx = Math.abs(x - child.position.x);
       const dz = Math.abs(z - child.position.z);
-      if (dx <= 1.85 && dz <= 1.85) {
-        if (type === 'deckModule' || type === 'lawnArea' || type === 'stonePath') return 0;
-        return 0.12; // Terrassilaudise pealispind
+      const limit = t === 'modernDeckWrap' ? 3.8 : 1.85;
+      if (dx <= limit && dz <= limit) {
+        if (type === 'deckModule' || type === 'modernDeckWrap' || type === 'hotTubIntegrated' || type === 'lawnArea' || type === 'stonePath') return 0;
+        const deckH = t === 'hotTubIntegrated' ? 0.32 : (t === 'modernDeckWrap' ? 0.24 : 0.12);
+        return deckH; // Terrassilaudise pealispind
       }
     }
   }
 
   // 2. Väliobjektid ja haljastus lähevad alati maapinnale y = 0
-  if (kind === 'scenery' || type === 'deckModule' || type === 'pond' || type === 'stonePath' ||
-      type === 'pine' || type === 'birch' || type === 'appleTree' || type === 'bushLilac' ||
-      type === 'hedgeThuja' || type === 'lawnArea' || type === 'gardenLight' || type === 'bbqGrill' ||
-      type === 'greenhouse' || type === 'raisedBed' || type === 'hotTub' || type === 'carModern' ||
-      type === 'carTrailer' || type === 'saunaPad' || type === 'solarPanel') {
+  if (kind === 'scenery' || type === 'deckModule' || type === 'modernDeckWrap' || type === 'hotTubIntegrated' ||
+      type === 'pond' || type === 'stonePath' || type === 'pine' || type === 'birch' || type === 'appleTree' ||
+      type === 'bushLilac' || type === 'hedgeThuja' || type === 'lawnArea' || type === 'gardenLight' ||
+      type === 'bbqGrill' || type === 'greenhouse' || type === 'raisedBed' || type === 'hotTub' ||
+      type === 'carModern' || type === 'carTrailer' || type === 'saunaPad' || type === 'solarPanel' ||
+      type === 'modernPergola' || type === 'slatScreenModern' || type === 'glassBalustrade' || type === 'modernBollard') {
     return 0;
   }
 
@@ -1658,18 +1745,35 @@ function placeSaunaTemplate() {
 
   rebuildAllWalls();
 
-  // Haljastus & aed sauna ümber
-  addAsset('deckModule', L / 2, W + 1.8);
-  addAsset('outdoorTable', L / 2, W + 1.8);
-  addAsset('hotTub', L + 2.8, W + 2.2);
-  addAsset('pond', L + 4.5, -3.5);
-  addAsset('pine', -4, W + 4, 0, 1.6);
-  addAsset('pine', L + 3, W + 7, 0, 1.8);
-  addAsset('birch', -6, -2, 0, 1.3);
-  addAsset('stonePath', L / 2, W + 3.8);
-  addAsset('gardenLight', L + 1.2, W + 3.4);
-  addAsset('gardenLight', -1.2, W + 1.2);
+  // Modernne L-kujuline ümbritsev terrass ja integreeritud tünnisaun
+  // 1. Sauna ees olev avar lõunaterrass (ühendatud laiaks platvormiks)
+  addAsset('deckModule', 1.0, W + 1.6);
+  addAsset('deckModule', 4.0, W + 1.6);
+  // 2. Sauna parempoolne külgterrass (spa tsoon)
+  addAsset('deckModule', L + 1.5, 1.2);
+  // 3. Täisintegreeritud kümblustünn terrassi sisse süvistatuna (koos puidust krae, LED-valgusrõnga ja astmetega)
+  addAsset('hotTubIntegrated', L + 1.8, W + 1.6);
+  // 4. Modernne välimööbli L-lounge terrassil
+  addAsset('modernLounge', 1.0, W + 1.6);
+  // 5. Minimalistlik gaasi-tulelaud klaaskaitse ja elava leegiga
+  addAsset('modernFireTable', 1.0, W + 2.8);
+  // 6. Termopuidust ribi-tuulesein terrassi lääneservas privaatsuseks ja tuulekaitseks
+  addAsset('slatScreenModern', -1.1, W + 1.6, Math.PI / 2);
+  // 7. Päikesetool spa-terrassil tünni kõrval
+  addAsset('sunLoungerModern', L + 3.4, 1.2, Math.PI / 2);
+  // 8. Minimalistlikud mustad terrassipollarid valgustuseks
+  addAsset('modernBollard', -1.0, W + 3.1);
+  addAsset('modernBollard', L + 3.6, W + 3.4);
+  // 9. Looduslik aed, männid ja kivid
+  addAsset('pond', L + 5.2, -3.2);
+  addAsset('pine', -4.5, W + 4.5, 0, 1.6);
+  addAsset('pine', L + 4.5, W + 6.5, 0, 1.8);
+  addAsset('birch', -6.5, -2, 0, 1.3);
+  addAsset('stonePath', 1.0, W + 3.6);
+  addAsset('stonePath', L + 1.8, W + 3.6);
+  // 10. Siseruumid ja modernne rippkamin
   addAsset('sofa', 1.4, 1.0);
+  addAsset('modernHangingFireplace', 2.3, 1.0);
   addAsset('stove', 4.4, 3.2);
   addAsset('lavaLong', 4.5, 2.3);
   addAsset('shower', 4.4, 0.45);
@@ -1679,9 +1783,9 @@ function placeSaunaTemplate() {
   roofConfig.material = 'roof_dark';
   rebuildRoof();
 
-  pushHist('Mall: Saunakompleks ja tiik');
+  pushHist('Mall: Modernne saunakompleks ja integreeritud terrass');
   refreshList();
-  setStatus('Laaditud saunakrundi näidis');
+  setStatus('✅ Laaditud modernne saunakompleks integreeritud terrassi ja tünniga');
 }
 
 function placeHouseTemplate() {
@@ -1882,8 +1986,11 @@ function select(o) {
   if (o.userData.kind !== 'wall' && o.userData.kind !== 'room') {
     transform.attach(o);
     hideWallHandles();
+    updateGizmoHud();
   } else {
     transform.detach();
+    document.getElementById('gizmo-rotation-hud')?.classList.add('hidden');
+    document.getElementById('gizmo-angle-tag')?.classList.add('hidden');
     if (o.userData.kind === 'wall') showWallHandles(o.userData.wallId);
     else hideWallHandles();
   }
@@ -1916,6 +2023,10 @@ function deselect() {
   clearClearanceDimensions();
   selected = null;
   selectionBoxHelper.visible = false;
+  document.getElementById('gizmo-rotation-hud')?.classList.add('hidden');
+  document.getElementById('gizmo-angle-tag')?.classList.add('hidden');
+  const tbBadge = document.getElementById('toolbar-rot-badge');
+  if (tbBadge) tbBadge.textContent = '0°';
   document.getElementById('btn-del').disabled = true;
   document.getElementById('props-empty').classList.remove('hidden');
   document.getElementById('props-form').classList.add('hidden');
@@ -2340,14 +2451,159 @@ function centerSelectedInRoom() {
   }
 }
 
-function rotateSelected90() {
+function rotateSelectedBy(deltaRad) {
   if (!selected || !selected.userData?.movable) return;
-  selected.rotation.y = (selected.rotation.y + Math.PI / 2) % (Math.PI * 2);
+  selected.rotation.y = ((selected.rotation.y + deltaRad) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
   syncProps();
   clampSel();
   pushHist();
   runErgoCheck();
-  setStatus('Pööratud 90°');
+  const deg = ((Math.round(THREE.MathUtils.radToDeg(selected.rotation.y)) % 360) + 360) % 360;
+  updateGizmoAngleReadout(deg);
+  setStatus(`Pööratud ${deltaRad > 0 ? '+90°' : '-90°'} (nurk: ${deg}°)`);
+}
+
+function rotateSelected90() {
+  rotateSelectedBy(Math.PI / 2);
+}
+
+function rotateSelectedCCW90() {
+  rotateSelectedBy(-Math.PI / 2);
+}
+
+let isDialDragging = false;
+let dialStartX = 0;
+let dialStartAngle = 0;
+
+function setupGizmoRotationHud() {
+  const dialContainer = document.getElementById('gizmo-rot-dial-container');
+  const angleTag = document.getElementById('gizmo-angle-tag');
+
+  if (dialContainer) {
+    dialContainer.addEventListener('mousedown', e => {
+      if (!selected || !selected.userData?.movable) return;
+      e.stopPropagation();
+      e.preventDefault();
+      isDialDragging = true;
+      dialStartX = e.clientX;
+      dialStartAngle = selected.rotation.y;
+      if (angleTag) {
+        angleTag.classList.remove('hidden');
+        angleTag.textContent = `${Math.round(THREE.MathUtils.radToDeg(selected.rotation.y))}°`;
+      }
+
+      const onMouseMove = ev => {
+        if (!isDialDragging || !selected) return;
+        const deltaX = ev.clientX - dialStartX;
+        let newAngleDeg = THREE.MathUtils.radToDeg(dialStartAngle) + deltaX * 0.75;
+
+        if (!ev.shiftKey) {
+          newAngleDeg = Math.round(newAngleDeg / 15) * 15;
+        } else {
+          newAngleDeg = Math.round(newAngleDeg);
+        }
+
+        const normDeg = ((Math.round(newAngleDeg) % 360) + 360) % 360;
+        selected.rotation.y = THREE.MathUtils.degToRad(normDeg);
+
+        syncProps();
+        clampSel();
+        updateGizmoAngleReadout(normDeg);
+        if (angleTag) {
+          angleTag.textContent = `📐 ${normDeg}°`;
+        }
+      };
+
+      const onMouseUp = () => {
+        if (isDialDragging) {
+          isDialDragging = false;
+          if (angleTag) angleTag.classList.add('hidden');
+          pushHist();
+          runErgoCheck();
+          if (selected) {
+            const finalDeg = ((Math.round(THREE.MathUtils.radToDeg(selected.rotation.y)) % 360) + 360) % 360;
+            setStatus(`Objekti nurk: ${finalDeg}°`);
+          }
+        }
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
+  document.getElementById('btn-gizmo-rot-left')?.addEventListener('click', e => {
+    e.stopPropagation();
+    rotateSelectedCCW90();
+  });
+  document.getElementById('btn-gizmo-rot-right')?.addEventListener('click', e => {
+    e.stopPropagation();
+    rotateSelected90();
+  });
+  document.getElementById('btn-rotate-ccw-90')?.addEventListener('click', rotateSelectedCCW90);
+  document.getElementById('btn-rotate-90')?.addEventListener('click', rotateSelected90);
+  document.getElementById('btn-snap-wall')?.addEventListener('click', snapSelectedToWall);
+  document.getElementById('btn-center-room')?.addEventListener('click', centerSelectedInRoom);
+}
+
+function updateGizmoHud() {
+  const hud = document.getElementById('gizmo-rotation-hud');
+  const angleTag = document.getElementById('gizmo-angle-tag');
+  if (!hud) return;
+
+  if (!selected || selected.userData.kind === 'wall' || selected.userData.kind === 'room' || viewMode === 'walk') {
+    hud.classList.add('hidden');
+    if (angleTag) angleTag.classList.add('hidden');
+    return;
+  }
+
+  const worldPos = new THREE.Vector3();
+  selected.getWorldPosition(worldPos);
+
+  const box3 = new THREE.Box3().setFromObject(selected);
+  const topY = isFinite(box3.max.y) ? box3.max.y : worldPos.y + 0.8;
+  const target3D = new THREE.Vector3(worldPos.x, topY + 0.2, worldPos.z);
+  target3D.project(camera);
+
+  if (target3D.z > 1.0) {
+    hud.classList.add('hidden');
+    if (angleTag) angleTag.classList.add('hidden');
+    return;
+  }
+
+  const vp = document.getElementById('viewport');
+  if (!vp) return;
+  const w = vp.clientWidth;
+  const h = vp.clientHeight;
+
+  const screenX = (target3D.x * 0.5 + 0.5) * w;
+  const screenY = (-target3D.y * 0.5 + 0.5) * h;
+
+  const clampedX = Math.max(80, Math.min(w - 80, screenX));
+  const clampedY = Math.max(50, Math.min(h - 50, screenY));
+
+  hud.style.left = `${clampedX}px`;
+  hud.style.top = `${clampedY}px`;
+  hud.classList.remove('hidden');
+
+  if (angleTag) {
+    angleTag.style.left = `${clampedX}px`;
+    angleTag.style.top = `${clampedY}px`;
+  }
+
+  const deg = ((Math.round(THREE.MathUtils.radToDeg(selected.rotation.y)) % 360) + 360) % 360;
+  updateGizmoAngleReadout(deg);
+}
+
+function updateGizmoAngleReadout(deg) {
+  const badge = document.getElementById('gizmo-rot-badge');
+  if (badge) badge.textContent = `${deg}°`;
+  const needle = document.getElementById('gizmo-rot-needle');
+  if (needle) needle.style.transform = `translateX(-50%) rotate(${deg}deg)`;
+  const toolbarBadge = document.getElementById('toolbar-rot-badge');
+  if (toolbarBadge) toolbarBadge.textContent = `${deg}°`;
 }
 
 function cloneSelected() {
@@ -3539,9 +3795,20 @@ function generateArchitecturalSvg(calc, cadStyle = false) {
 
         if (op.type === 'door') {
           out += `<circle cx="${sox}" cy="${soy}" r="3" fill="${doorStroke}" />`;
-          out += `<line x1="${sox}" y1="${soy}" x2="${+sox + Math.cos(angle + Math.PI/2)*opW}" y2="${+soy + Math.sin(angle + Math.PI/2)*opW}" stroke="${doorStroke}" stroke-width="1.5" />`;
+          const swingEndX = +sox + Math.cos(angle + Math.PI/2) * opW;
+          const swingEndY = +soy + Math.sin(angle + Math.PI/2) * opW;
+          out += `<line x1="${sox}" y1="${soy}" x2="${swingEndX}" y2="${swingEndY}" stroke="${doorStroke}" stroke-width="1.8" />`;
+          // Arhitektuurne ukse 90-kraadine avanemiskaar
+          out += `<path d="M ${swingEndX} ${swingEndY} A ${opW} ${opW} 0 0 0 ${+sox + Math.cos(angle)*opW} ${+soy + Math.sin(angle)*opW}" fill="none" stroke="${doorStroke}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.85" />`;
         } else {
-          out += `<circle cx="${sox}" cy="${soy}" r="2.5" fill="${winStroke}" />`;
+          // Aken: kahekordne joon lengi ja klaasiga
+          const perpX = Math.cos(angle + Math.PI/2) * 2.5;
+          const perpY = Math.sin(angle + Math.PI/2) * 2.5;
+          const ax1 = sox - Math.cos(angle)*(opW/2), ay1 = soy - Math.sin(angle)*(opW/2);
+          const ax2 = sox + Math.cos(angle)*(opW/2), ay2 = soy + Math.sin(angle)*(opW/2);
+          out += `<line x1="${ax1 + perpX}" y1="${ay1 + perpY}" x2="${ax2 + perpX}" y2="${ay2 + perpY}" stroke="${winStroke}" stroke-width="1.5" />`;
+          out += `<line x1="${ax1 - perpX}" y1="${ay1 - perpY}" x2="${ax2 - perpX}" y2="${ay2 - perpY}" stroke="${winStroke}" stroke-width="1.5" />`;
+          out += `<line x1="${ax1}" y1="${ay1}" x2="${ax2}" y2="${ay2}" stroke="${winStroke}" stroke-width="2.5" />`;
         }
       });
     }
@@ -3554,6 +3821,44 @@ function generateArchitecturalSvg(calc, cadStyle = false) {
       out += `<text x="${mx}" y="${my + 3}" fill="${dimLine}" font-size="9" font-weight="bold" text-anchor="middle">${len.toFixed(2)}</text>`;
     }
   });
+
+  // 5.1 Hoone üldmõõtude arhitektuurne mõõtekett (Outer dimension chains)
+  let bMinX = Infinity, bMaxX = -Infinity, bMinZ = Infinity, bMaxZ = -Infinity;
+  walls.forEach(w => {
+    bMinX = Math.min(bMinX, w.x1, w.x2);
+    bMaxX = Math.max(bMaxX, w.x1, w.x2);
+    bMinZ = Math.min(bMinZ, w.z1, w.z2);
+    bMaxZ = Math.max(bMaxZ, w.z1, w.z2);
+  });
+  if (isFinite(bMinX) && bMaxX > bMinX && bMaxZ > bMinZ) {
+    const bW = (bMaxX - bMinX).toFixed(2);
+    const bD = (bMaxZ - bMinZ).toFixed(2);
+    const bOffset = 1.4;
+    // Ülemine mõõteliin (Põhi)
+    const topZ = toSvgY(bMinZ - bOffset);
+    const topX1 = toSvgX(bMinX), topX2 = toSvgX(bMaxX);
+    out += `<g class="dim-chain">`;
+    out += `<line x1="${topX1}" y1="${topZ}" x2="${topX2}" y2="${topZ}" stroke="${dimLine}" stroke-width="1.2" />`;
+    out += `<line x1="${topX1}" y1="${toSvgY(bMinZ)}" x2="${topX1}" y2="${topZ - 4}" stroke="${dimLine}" stroke-width="0.8" stroke-dasharray="2,2" />`;
+    out += `<line x1="${topX2}" y1="${toSvgY(bMinZ)}" x2="${topX2}" y2="${topZ - 4}" stroke="${dimLine}" stroke-width="0.8" stroke-dasharray="2,2" />`;
+    out += `<line x1="${topX1 - 3}" y1="${topZ + 3}" x2="${topX1 + 3}" y2="${topZ - 3}" stroke="${dimLine}" stroke-width="1.8" />`;
+    out += `<line x1="${topX2 - 3}" y1="${topZ + 3}" x2="${topX2 + 3}" y2="${topZ - 3}" stroke="${dimLine}" stroke-width="1.8" />`;
+    out += `<rect x="${(parseFloat(topX1) + parseFloat(topX2))/2 - 22}" y="${topZ - 14}" width="44" height="13" rx="2" fill="${bg}" opacity="0.9" />`;
+    out += `<text x="${(parseFloat(topX1) + parseFloat(topX2))/2}" y="${topZ - 4}" fill="${dimLine}" font-size="10" font-weight="bold" text-anchor="middle">${bW} m</text>`;
+
+    // Vasak mõõteliin (Lääs)
+    const leftX = toSvgX(bMinX - bOffset);
+    const leftZ1 = toSvgY(bMinZ), leftZ2 = toSvgY(bMaxZ);
+    out += `<line x1="${leftX}" y1="${leftZ1}" x2="${leftX}" y2="${leftZ2}" stroke="${dimLine}" stroke-width="1.2" />`;
+    out += `<line x1="${toSvgX(bMinX)}" y1="${leftZ1}" x2="${leftX - 4}" y2="${leftZ1}" stroke="${dimLine}" stroke-width="0.8" stroke-dasharray="2,2" />`;
+    out += `<line x1="${toSvgX(bMinX)}" y1="${leftZ2}" x2="${leftX - 4}" y2="${leftZ2}" stroke="${dimLine}" stroke-width="0.8" stroke-dasharray="2,2" />`;
+    out += `<line x1="${leftX - 3}" y1="${leftZ1 + 3}" x2="${leftX + 3}" y2="${leftZ1 - 3}" stroke="${dimLine}" stroke-width="1.8" />`;
+    out += `<line x1="${leftX - 3}" y1="${leftZ2 + 3}" x2="${leftX + 3}" y2="${leftZ2 - 3}" stroke="${dimLine}" stroke-width="1.8" />`;
+    const midLeftZ = (parseFloat(leftZ1) + parseFloat(leftZ2))/2;
+    out += `<rect x="${leftX - 16}" y="${midLeftZ - 22}" width="13" height="44" rx="2" fill="${bg}" opacity="0.9" />`;
+    out += `<text x="${leftX - 5}" y="${midLeftZ}" fill="${dimLine}" font-size="10" font-weight="bold" text-anchor="middle" transform="rotate(-90 ${leftX - 5} ${midLeftZ})">${bD} m</text>`;
+    out += `</g>`;
+  }
 
   // 6. Ruumid (nimetused ja ruutmeetrid)
   rooms.forEach(r => {
@@ -3633,7 +3938,7 @@ function openBlueprintModal() {
 function renderBlueprintModalContent() {
   const calc = calculateConstruction(walls, rooms, allEditable(), roofConfig);
   const projName = document.getElementById('project-name')?.value || 'Kodu ja krundi projekt';
-  const container = document.getElementById('blueprint-preview-container');
+  const container = document.getElementById('blueprint-modal-sheet') || document.getElementById('blueprint-preview-container');
   if (!container) return;
 
   const svgHtml = generateArchitecturalSvg(calc, blueprintCadStyle);
@@ -3687,7 +3992,41 @@ function downloadBlueprintSvg() {
   setStatus('SVG joonis alla laaditud');
 }
 
+function downloadBlueprintPng() {
+  const calc = calculateConstruction(walls, rooms, allEditable(), roofConfig);
+  const svgData = generateArchitecturalSvg(calc, blueprintCadStyle);
+  const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2; // HD kvaliteet
+    const cvs = document.createElement('canvas');
+    cvs.width = (img.width || 800) * scale;
+    cvs.height = (img.height || 600) * scale;
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle = blueprintCadStyle ? '#0c1524' : '#ffffff';
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    cvs.toBlob(pngBlob => {
+      if (!pngBlob) return;
+      const pngUrl = URL.createObjectURL(pngBlob);
+      const a = document.createElement('a');
+      const name = (document.getElementById('project-name')?.value || 'plaan').replace(/\s+/g, '_');
+      a.href = pngUrl;
+      a.download = `arhi-plaan-${name}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(pngUrl), 1500);
+      setStatus('🖼️ Kõrge resolutsiooniga PNG joonis alla laaditud');
+    }, 'image/png');
+  };
+  img.src = url;
+}
+
 // Blueprint modali nupud
+document.getElementById('btn-open-blueprint')?.addEventListener('click', openBlueprintModal);
+document.getElementById('btn-blueprint-modal')?.addEventListener('click', openBlueprintModal);
 document.getElementById('btn-blueprint-close')?.addEventListener('click', () => {
   document.getElementById('blueprint-modal')?.classList.add('hidden');
 });
@@ -3701,7 +4040,419 @@ document.getElementById('btn-blueprint-style')?.addEventListener('click', () => 
   renderBlueprintModalContent();
 });
 document.getElementById('btn-blueprint-download-svg')?.addEventListener('click', downloadBlueprintSvg);
+document.getElementById('btn-blueprint-download-png')?.addEventListener('click', downloadBlueprintPng);
 document.getElementById('btn-print-blueprint')?.addEventListener('click', () => window.print());
+
+// ============================================================================
+// 📦 3D MUDELI EKSPORT (OBJ, GLTF, JSON)
+// ============================================================================
+function openExport3DModal() {
+  document.getElementById('modal-export-3d')?.classList.remove('hidden');
+  setStatus('📦 3D mudeli eksportija avatud');
+}
+
+document.getElementById('btn-open-3d-export')?.addEventListener('click', openExport3DModal);
+document.getElementById('btn-export-3d-close')?.addEventListener('click', () => {
+  document.getElementById('modal-export-3d')?.classList.add('hidden');
+});
+document.getElementById('btn-export-3d-close-2')?.addEventListener('click', () => {
+  document.getElementById('modal-export-3d')?.classList.add('hidden');
+});
+
+// OBJ allalaadimine
+document.getElementById('btn-download-obj')?.addEventListener('click', () => {
+  const onlyBuilding = document.getElementById('export-only-building')?.checked ?? true;
+  const projName = (document.getElementById('project-name')?.value || 'kodu_mudel').replace(/\s+/g, '_');
+  try {
+    const objContent = exportSceneToObj(scene, { onlyBuilding });
+    triggerFileDownload(objContent, `${projName}_3D.obj`, 'text/plain');
+    setStatus(`✅ 3D Wavefront OBJ mudel (${onlyBuilding ? 'ainult hoone' : 'kogu krunt'}) alla laaditud`);
+  } catch (err) {
+    console.error('OBJ eksport ebaõnnestus:', err);
+    setStatus('Viga 3D OBJ ekspordil');
+  }
+});
+
+// glTF allalaadimine
+document.getElementById('btn-download-gltf')?.addEventListener('click', async () => {
+  const onlyBuilding = document.getElementById('export-only-building')?.checked ?? true;
+  const projName = (document.getElementById('project-name')?.value || 'kodu_mudel').replace(/\s+/g, '_');
+  setStatus('Genereerin glTF 3D-faili...');
+  try {
+    const target = onlyBuilding ? (layers.building || scene) : scene;
+    const gltfData = await exportSceneToGltf(target, { binary: false });
+    const jsonStr = JSON.stringify(gltfData, null, 2);
+    triggerFileDownload(jsonStr, `${projName}_3D.gltf`, 'application/json');
+    setStatus(`✅ 3D glTF mudel alla laaditud`);
+  } catch (err) {
+    console.warn('glTF eksport ebaõnnestus, lülitun OBJ tagavarale:', err);
+    const objContent = exportSceneToObj(scene, { onlyBuilding });
+    triggerFileDownload(objContent, `${projName}_3D.obj`, 'text/plain');
+    setStatus('glTF asemel genereeriti universaalne .OBJ mudel');
+  }
+});
+
+// JSON BIM allalaadimine
+document.getElementById('btn-download-bim-json')?.addEventListener('click', () => {
+  const projName = (document.getElementById('project-name')?.value || 'projekt').replace(/\s+/g, '_');
+  const calc = calculateConstruction(walls, rooms, allEditable(), roofConfig);
+  const bimData = {
+    projectName: projName,
+    exportedAt: new Date().toISOString(),
+    generator: 'KoduDisain 3D Studio',
+    plot: plotConfig,
+    roof: roofConfig,
+    walls: walls,
+    rooms: rooms,
+    objects: allEditable().map(o => ({
+      type: o.userData.type,
+      kind: o.userData.kind,
+      position: { x: o.position.x, y: o.position.y, z: o.position.z },
+      rotation: o.rotation.y,
+    })),
+    constructionBom: calc,
+  };
+  triggerFileDownload(JSON.stringify(bimData, null, 2), `${projName}_BIM.json`, 'application/json');
+  setStatus('✅ KoduDisain BIM parameetrilised andmed alla laaditud');
+});
+
+// ============================================================================
+// ⚡ ENERGIAMÄRGIS JA SOOJUSKALKULAATOR
+// ============================================================================
+let currentEnergySystem = 'air_water_heat_pump';
+let currentEnergyVent = 'hr';
+let currentEnergyGlazing = 'triple';
+let currentEnergyPvKw = 0;
+
+function updateEnergyModal() {
+  const heatSysKey = document.getElementById('energy-heat-source')?.value || currentEnergySystem;
+  const ventVal = document.querySelector('input[name="energy-vent"]:checked')?.value || currentEnergyVent;
+  const glazingVal = document.querySelector('input[name="energy-glazing"]:checked')?.value || currentEnergyGlazing;
+  const pvSlider = document.getElementById('energy-pv-slider');
+  const pvKw = pvSlider ? parseFloat(pvSlider.value) : currentEnergyPvKw;
+
+  currentEnergySystem = heatSysKey;
+  currentEnergyVent = ventVal;
+  currentEnergyGlazing = glazingVal;
+  currentEnergyPvKw = pvKw;
+
+  const pvValEl = document.getElementById('energy-pv-val');
+  if (pvValEl) pvValEl.textContent = `${pvKw} kWp`;
+
+  const energy = calculateBuildingEnergy({
+    walls,
+    rooms,
+    roofConfig,
+    heatingSystemKey: currentEnergySystem,
+    heatRecovery: currentEnergyVent === 'hr',
+    tripleGlazing: currentEnergyGlazing === 'triple',
+    solarPanelsKw: currentEnergyPvKw,
+  });
+
+  // Uuenda klassi märk
+  const badgeEl = document.getElementById('energy-class-badge');
+  if (badgeEl) {
+    badgeEl.textContent = energy.energyClass.class;
+    badgeEl.style.background = energy.energyClass.color;
+    badgeEl.style.boxShadow = `0 4px 14px ${energy.energyClass.color}55`;
+  }
+
+  const titleEl = document.getElementById('energy-class-title');
+  if (titleEl) titleEl.textContent = energy.energyClass.label;
+
+  const etaEl = document.getElementById('energy-eta-val');
+  if (etaEl) etaEl.innerHTML = `Kaalutud energiakasutus ETA: <strong>${energy.eta} kWh/m²a</strong>`;
+
+  const costEl = document.getElementById('energy-annual-cost');
+  if (costEl) costEl.textContent = `~${energy.totalAnnualEnergyCost.toLocaleString('et-EE')} € / aastas`;
+
+  // Aktiivne skaalarida
+  document.querySelectorAll('.energy-scale-row').forEach(row => {
+    const scale = row.getAttribute('data-scale');
+    row.classList.toggle('active-class', scale === energy.energyClass.class);
+  });
+
+  // Soojuskadude tulbad
+  const lossContainer = document.getElementById('energy-heat-loss-bars');
+  if (lossContainer) {
+    const totalLoss = Object.values(energy.heatLosses).reduce((a, b) => a + b, 0) || 1;
+    const lossLabels = {
+      walls: 'Välisseinad',
+      roof: 'Katus / lagi',
+      floor: 'Põrand',
+      windows: 'Aknad',
+      doors: 'Välisuksed',
+      ventilation: 'Ventilatsioon',
+    };
+    lossContainer.innerHTML = Object.entries(energy.heatLosses).map(([k, v]) => {
+      const pct = Math.round((v / totalLoss) * 100);
+      return `
+        <div class="heat-loss-row">
+          <span class="loss-lbl">${lossLabels[k] || k}</span>
+          <div class="loss-track">
+            <div class="loss-fill" style="width: ${pct}%;"></div>
+          </div>
+          <span class="loss-val">${v.toLocaleString('et-EE')} kWh (${pct}%)</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // U-tabel
+  const tableBody = document.getElementById('energy-u-table-body');
+  if (tableBody) {
+    tableBody.innerHTML = `
+      <tr><td>Välisseinad</td><td>${energy.extWallNetArea} m²</td><td>U = ${energy.uValues.wall} W/m²K</td><td>${energy.heatLosses.walls.toLocaleString('et-EE')} kWh/a</td></tr>
+      <tr><td>Katus / laepealne</td><td>${energy.roofArea} m²</td><td>U = ${energy.uValues.roof} W/m²K</td><td>${energy.heatLosses.roof.toLocaleString('et-EE')} kWh/a</td></tr>
+      <tr><td>Põrand pinnasel</td><td>${energy.netFloorArea} m²</td><td>U = ${energy.uValues.floor} W/m²K</td><td>${energy.heatLosses.floor.toLocaleString('et-EE')} kWh/a</td></tr>
+      <tr><td>Aknad</td><td>${energy.windowsArea} m²</td><td>U = ${energy.uValues.window} W/m²K</td><td>${energy.heatLosses.windows.toLocaleString('et-EE')} kWh/a</td></tr>
+      <tr><td>Välisuksed</td><td>${energy.doorsArea} m²</td><td>U = ${energy.uValues.door} W/m²K</td><td>${energy.heatLosses.doors.toLocaleString('et-EE')} kWh/a</td></tr>
+    `;
+  }
+
+  // Päikesepotentsiaal
+  const pvTitle = document.getElementById('energy-pv-potential-title');
+  if (pvTitle) pvTitle.textContent = `Katuse päikesepotentsiaal: ~${energy.pvPotential.recommendedKw} kWp`;
+  const pvDesc = document.getElementById('energy-pv-potential-desc');
+  if (pvDesc) pvDesc.textContent = `Aastane eeldatav elektritoodang ${energy.pvPotential.annualProductionKwh.toLocaleString('et-EE')} kWh, hinnanguline sääst elektriarvetelt ~${energy.pvPotential.annualSavingsEur.toLocaleString('et-EE')} € / aastas.`;
+
+  // Soovitused
+  const tipsContainer = document.getElementById('energy-recommendations-list');
+  if (tipsContainer) {
+    tipsContainer.innerHTML = energy.recommendations.map(t => `
+      <div class="energy-tip-card ${t.priority}">
+        <span class="energy-tip-icon">${t.icon}</span>
+        <div class="energy-tip-content">
+          <strong>${t.title}</strong>
+          <p>${t.text}</p>
+        </div>
+      </div>
+    `).join('');
+  }
+}
+
+function openEnergyModal() {
+  if (!rooms.length) detectRoomsFromWalls(true);
+  updateEnergyModal();
+  document.getElementById('energy-modal')?.classList.remove('hidden');
+  setStatus('⚡ Energiamärgis ja soojusbilanss avatud');
+}
+
+document.getElementById('btn-open-energy')?.addEventListener('click', openEnergyModal);
+document.getElementById('btn-energy-close')?.addEventListener('click', () => {
+  document.getElementById('energy-modal')?.classList.add('hidden');
+});
+document.getElementById('btn-energy-close-2')?.addEventListener('click', () => {
+  document.getElementById('energy-modal')?.classList.add('hidden');
+});
+document.getElementById('btn-print-energy')?.addEventListener('click', () => window.print());
+
+// Interaktiivsed kuulajad energiakalkulaatorile
+document.getElementById('energy-heat-source')?.addEventListener('change', updateEnergyModal);
+document.querySelectorAll('input[name="energy-vent"]').forEach(r => r.addEventListener('change', updateEnergyModal));
+document.querySelectorAll('input[name="energy-glazing"]').forEach(r => r.addEventListener('change', updateEnergyModal));
+document.getElementById('energy-pv-slider')?.addEventListener('input', updateEnergyModal);
+
+// ==========================================
+// PUNKT 5: PÄIKESE JA VARJUDE SIMULATSIOON (SUN & SHADOW STUDY)
+// ==========================================
+let activeSunStudyHour = 14.0;
+let activeSunStudySeason = 'summer';
+
+function formatSimHour(h) {
+  const hr = Math.floor(h);
+  const min = Math.round((h - hr) * 60);
+  return `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+function applySunStudy(hour, seasonKey = activeSunStudySeason) {
+  activeSunStudyHour = hour;
+  activeSunStudySeason = seasonKey;
+  currentSolarHour = hour;
+  currentSolarSeason = seasonKey;
+
+  const res = calculateSolarPosition(hour, seasonKey, plotConfig.northAngle);
+
+  // 1. Uuenda Three.js päikese ja taeva valgustust
+  if (sun) {
+    sun.position.set(res.pos[0], res.pos[1], res.pos[2]);
+    sun.color.setHex(res.color);
+    sun.intensity = res.intensity;
+  }
+  if (hemiLight) {
+    hemiLight.color.setHex(res.hemiSky);
+    hemiLight.groundColor.setHex(res.hemiGround);
+  }
+  if (scene.background) {
+    scene.background.setHex(res.sky);
+  }
+  if (scene.fog) {
+    scene.fog.color.setHex(res.fog);
+  }
+
+  // 2. Uuenda UI modalit
+  const timeDisplay = document.getElementById('sun-study-time-display');
+  if (timeDisplay) timeDisplay.textContent = formatSimHour(hour);
+
+  const timeSlider = document.getElementById('sun-study-time-slider');
+  if (timeSlider && Math.abs(parseFloat(timeSlider.value) - hour) > 0.1) {
+    timeSlider.value = hour;
+  }
+
+  const altEl = document.getElementById('sun-stat-altitude');
+  if (altEl) altEl.textContent = `${res.altitudeDeg}°`;
+
+  const phaseEl = document.getElementById('sun-stat-phase');
+  if (phaseEl) {
+    if (res.isNight) phaseEl.textContent = 'Öö (valgustid sisse lülitatud)';
+    else if (res.isDusk) phaseEl.textContent = 'Loojang / Hämarik (kuldne kuma)';
+    else if (res.isGolden) phaseEl.textContent = 'Kuldne tund (pikad pehmed varjud)';
+    else phaseEl.textContent = 'Päike kõrgel taevas';
+  }
+
+  const azEl = document.getElementById('sun-stat-azimuth');
+  if (azEl) azEl.textContent = `${res.azimuthDeg}° (${res.azimuthCompass})`;
+
+  const daylenEl = document.getElementById('sun-stat-daylen');
+  if (daylenEl) daylenEl.textContent = `Päevapikkus ${res.insolation.dayHours} (${res.insolation.sunRise}–${res.insolation.sunSet})`;
+
+  const pvEl = document.getElementById('sun-stat-pv');
+  if (pvEl) pvEl.textContent = `${res.insolation.pvFactor}%`;
+
+  const terraceStatEl = document.getElementById('sun-stat-terrace-status');
+  if (terraceStatEl) {
+    terraceStatEl.textContent = `${res.insolation.terraceStatus} (~${res.insolation.terracePct}%)`;
+    terraceStatEl.style.color = res.insolation.terracePct > 50 ? '#15803d' : '#b45309';
+    terraceStatEl.style.background = res.insolation.terracePct > 50 ? '#dcfce7' : '#fef3c7';
+  }
+
+  const tubEl = document.getElementById('sun-stat-tub-advice');
+  if (tubEl) tubEl.textContent = res.insolation.tubAdvice;
+
+  // 3. Uuenda ka vana tööriistariba popoveri ja nupu olekut
+  const timeStr = formatSimHour(hour);
+  const btnSun = document.getElementById('btn-sun');
+  if (btnSun) btnSun.textContent = (res.isNight ? '🌙 ' : '☀️ ') + timeStr;
+
+  const clockEl = document.getElementById('solar-time-clock');
+  if (clockEl) clockEl.textContent = timeStr;
+
+  const sliderEl = document.getElementById('solar-time-slider');
+  if (sliderEl && Math.abs(parseFloat(sliderEl.value) - hour) > 0.05) sliderEl.value = hour;
+
+  const popoverAlt = document.getElementById('solar-altitude-val');
+  if (popoverAlt) popoverAlt.textContent = !res.isNight ? `${Math.round(res.altitudeDeg)}°` : '0° (öö)';
+
+  const popoverAz = document.getElementById('solar-azimuth-val');
+  if (popoverAz) popoverAz.textContent = `${Math.round(res.azimuthDeg)}° ${res.azimuthCompass}`;
+
+  const descEl = document.getElementById('solar-shadow-desc');
+  const statusEl = document.getElementById('solar-time-status');
+  if (descEl) {
+    if (res.isNight) descEl.textContent = 'Öine hämarus, päikesevarjud puuduvad';
+    else if (res.altitudeDeg < 15) descEl.textContent = 'Pikad dramaatilised madala päikese varjud';
+    else if (res.altitudeDeg > 45) descEl.textContent = 'Lühikesed kompaktsed keskpäevased varjud otse lõunast';
+    else descEl.textContent = 'Mõõdukad pehmed varjud';
+  }
+  if (statusEl) {
+    if (res.isNight) statusEl.textContent = 'Öine vaade';
+    else if (res.altitudeDeg < 15) statusEl.textContent = hour < 12 ? 'Varajane hommikupäike' : 'Hiline õhtupäike / kuldne tund';
+    else if (res.altitudeDeg > 45) statusEl.textContent = 'Keskpäevane ere insolatsioon';
+    else statusEl.textContent = 'Mugav päevavalgus';
+  }
+
+  // 4. Uuenda kompassi näidikut
+  updateCompassUi();
+}
+
+function openSunStudyModal() {
+  applySunStudy(activeSunStudyHour, activeSunStudySeason);
+  const modal = document.getElementById('modal-sun-study');
+  modal?.classList.remove('hidden');
+
+  const northSlider = document.getElementById('sun-study-north-slider');
+  const northVal = document.getElementById('sun-study-north-val');
+  if (northSlider) northSlider.value = plotConfig.northAngle;
+  if (northVal) northVal.textContent = `${plotConfig.northAngle}°`;
+
+  setStatus('☀️ Päikese ja varjude simulatsioon avatud');
+}
+
+function closeSunStudyModal() {
+  stopSunTimelapse();
+  const playBtn = document.getElementById('btn-sun-study-play');
+  if (playBtn) playBtn.textContent = '▶ Mängi päeva liikumist (Time-lapse)';
+  document.getElementById('modal-sun-study')?.classList.add('hidden');
+}
+
+document.getElementById('btn-open-sun-study')?.addEventListener('click', openSunStudyModal);
+document.getElementById('btn-sun-study-close')?.addEventListener('click', closeSunStudyModal);
+document.getElementById('btn-sun-study-close-2')?.addEventListener('click', closeSunStudyModal);
+
+// Kellaaja liugur
+document.getElementById('sun-study-time-slider')?.addEventListener('input', e => {
+  stopSunTimelapse();
+  const playBtn = document.getElementById('btn-sun-study-play');
+  if (playBtn) playBtn.textContent = '▶ Mängi päeva liikumist (Time-lapse)';
+  applySunStudy(parseFloat(e.target.value), activeSunStudySeason);
+});
+
+// Aastaaja nupud
+document.querySelectorAll('.season-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.season-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.borderColor = '#cbd5e1';
+      b.style.background = '#fff';
+    });
+    btn.classList.add('active');
+    btn.style.borderColor = '#d97706';
+    btn.style.background = '#fef3c7';
+    activeSunStudySeason = btn.dataset.season;
+    applySunStudy(activeSunStudyHour, activeSunStudySeason);
+  });
+});
+
+// Time-lapse animatsiooni nupp
+document.getElementById('btn-sun-study-play')?.addEventListener('click', () => {
+  const playBtn = document.getElementById('btn-sun-study-play');
+  const speedEl = document.getElementById('sun-study-speed');
+  const speed = speedEl ? parseFloat(speedEl.value) || 2 : 2;
+
+  if (isSunTimelapseRunning()) {
+    stopSunTimelapse();
+    if (playBtn) playBtn.textContent = '▶ Mängi päeva liikumist (Time-lapse)';
+  } else {
+    if (playBtn) playBtn.textContent = '⏸ Paus (Time-lapse)';
+    startSunTimelapse((simHour, season) => {
+      applySunStudy(simHour, season);
+    }, speed);
+  }
+});
+
+// Kiiruse muutmine
+document.getElementById('sun-study-speed')?.addEventListener('change', e => {
+  if (isSunTimelapseRunning()) {
+    const playBtn = document.getElementById('btn-sun-study-play');
+    stopSunTimelapse();
+    startSunTimelapse((simHour, season) => {
+      applySunStudy(simHour, season);
+    }, parseFloat(e.target.value) || 2);
+    if (playBtn) playBtn.textContent = '⏸ Paus (Time-lapse)';
+  }
+});
+
+// Krundi põhjasuuna liugur simulatsiooni sees
+document.getElementById('sun-study-north-slider')?.addEventListener('input', e => {
+  const val = parseInt(e.target.value, 10) || 0;
+  plotConfig.northAngle = val;
+  const northVal = document.getElementById('sun-study-north-val');
+  if (northVal) northVal.textContent = `${val}°`;
+  const plotNorth = document.getElementById('plot-north');
+  if (plotNorth) plotNorth.value = val;
+  rebuildPlotMesh();
+  applySunStudy(activeSunStudyHour, activeSunStudySeason);
+});
 
 // Spetsifikatsiooni ja BOM mahutabeli modal
 const specModal = document.getElementById('spec-modal');
@@ -4179,12 +4930,64 @@ function focusSelected() {
 function setShadowsEnabled(enabled) {
   shadowsEnabled = !!enabled;
   document.getElementById('btn-shadows')?.classList.toggle('active', shadowsEnabled);
-  if (currentShadingMode === 'rendered') {
-    sun.castShadow = shadowsEnabled;
-    renderer.shadowMap.enabled = shadowsEnabled;
-  }
-  setStatus(shadowsEnabled ? 'Varjud sisse lülitatud' : 'Varjud välja lülitatud (kiire CAD jõudlus)');
+  sun.castShadow = shadowsEnabled;
+  renderer.shadowMap.enabled = shadowsEnabled;
+  setStatus(shadowsEnabled ? 'Varjud sisse lülitatud' : 'Varjud välja lülitatud (kiire CAD jõudlus & aku sääst)');
 }
+
+// Jõudluse ja sujuvuse lüliti (⚡ Sujuv / ✨ Detailne)
+let performanceMode = true;
+function setPerformanceMode(turbo) {
+  performanceMode = turbo;
+  const btn = document.getElementById('btn-perf-mode');
+  if (btn) {
+    btn.classList.toggle('active', performanceMode);
+    btn.innerHTML = performanceMode ? '⚡ Sujuv' : '✨ Detailne';
+    btn.title = performanceMode ? 'Jõudlus: Sujuv (optimeeritud madala ressursikuluga)' : 'Jõudlus: Detailne (kõrge graafika)';
+  }
+  renderer.setPixelRatio(performanceMode ? 1.0 : Math.min(window.devicePixelRatio || 1, 1.5));
+  if (sun.shadow) {
+    const sz = performanceMode ? 512 : 1024;
+    sun.shadow.mapSize.set(sz, sz);
+    if (sun.shadow.map) {
+      sun.shadow.map.dispose();
+      sun.shadow.map = null;
+    }
+  }
+  setStatus(performanceMode ? '⚡ Jõudlus: Sujuv režiim (kiire & kerge arvutile)' : '✨ Jõudlus: Detailne režiim (kõrge resolutsioon)');
+}
+document.getElementById('btn-perf-mode')?.addEventListener('click', () => setPerformanceMode(!performanceMode));
+
+// Korruste valik HUD-is (1. K, 2. K, Kõik)
+let activeLevel = 'all';
+function setActiveLevel(level) {
+  activeLevel = level;
+  ['0', '1', 'all'].forEach(l => {
+    document.getElementById(`btn-level-${l}`)?.classList.toggle('active', l === level);
+  });
+  const LEVEL_HEIGHT = 2.8;
+  layers.building.children.forEach(obj => {
+    if (level === 'all') {
+      obj.visible = true;
+    } else if (level === '0') {
+      obj.visible = (obj.position.y < LEVEL_HEIGHT + 0.15);
+    } else if (level === '1') {
+      obj.visible = (obj.position.y >= LEVEL_HEIGHT - 0.2);
+    }
+  });
+  if (level === '0') {
+    layers.roof.visible = false;
+    document.getElementById('btn-roof')?.classList.remove('active');
+  } else if (level === 'all') {
+    layers.roof.visible = true;
+    document.getElementById('btn-roof')?.classList.add('active');
+  }
+  const names = { '0': '1. korrus', '1': '2. korrus', 'all': 'Kõik korrused' };
+  setStatus(`Aktiivne korrus: ${names[level] || level}`);
+}
+['0', '1', 'all'].forEach(l => {
+  document.getElementById(`btn-level-${l}`)?.addEventListener('click', () => setActiveLevel(l));
+});
 
 function setShadingMode(mode) {
   currentShadingMode = mode;
@@ -4210,8 +5013,8 @@ function setShadingMode(mode) {
     renderer.shadowMap.enabled = false;
   } else if (mode === 'material') {
     scene.overrideMaterial = null;
-    sun.castShadow = false;
-    renderer.shadowMap.enabled = false;
+    sun.castShadow = shadowsEnabled;
+    renderer.shadowMap.enabled = shadowsEnabled;
   } else if (mode === 'rendered') {
     scene.overrideMaterial = null;
     sun.castShadow = shadowsEnabled;
@@ -4259,8 +5062,80 @@ document.getElementById('btn-roof')?.addEventListener('click', () => {
   setStatus(layers.roof.visible ? 'Katus nähtav' : 'Katus peidetud (vaata siseruume)');
 });
 
+// Päikese & Insolatsiooni Stuudio (Reaalajas arvutus & varjud)
+let currentSolarHour = 14;
+let currentSolarSeason = 'summer';
+let solarTimelapseTimer = null;
+
+function updateSolarStudy(hour, season = currentSolarSeason) {
+  applySunStudy(hour, season);
+}
+
+// Päikesestuudio popoveri lülitamine
 document.getElementById('btn-sun')?.addEventListener('click', () => {
-  setSunTime(currentSunIndex + 1);
+  const pop = document.getElementById('solar-study-popover');
+  if (pop) {
+    const isHidden = pop.classList.contains('hidden');
+    pop.classList.toggle('hidden', !isHidden);
+    if (isHidden) updateSolarStudy(currentSolarHour, currentSolarSeason);
+  }
+});
+document.getElementById('btn-solar-close')?.addEventListener('click', () => {
+  document.getElementById('solar-study-popover')?.classList.add('hidden');
+});
+
+// Aja liugur
+document.getElementById('solar-time-slider')?.addEventListener('input', e => {
+  if (solarTimelapseTimer) {
+    clearInterval(solarTimelapseTimer);
+    solarTimelapseTimer = null;
+    const playBtn = document.getElementById('btn-solar-timelapse');
+    if (playBtn) {
+      playBtn.textContent = '▶ Mängi päeva kulgu';
+      playBtn.classList.remove('playing');
+    }
+  }
+  updateSolarStudy(parseFloat(e.target.value));
+});
+
+// Aastaaegade nupud
+document.querySelectorAll('.solar-season-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.solar-season-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const season = btn.dataset.season || 'summer';
+    updateSolarStudy(currentSolarHour, season);
+  });
+});
+
+// Päeva kulgemise timelapse
+document.getElementById('btn-solar-timelapse')?.addEventListener('click', () => {
+  const playBtn = document.getElementById('btn-solar-timelapse');
+  if (solarTimelapseTimer) {
+    clearInterval(solarTimelapseTimer);
+    solarTimelapseTimer = null;
+    if (playBtn) {
+      playBtn.textContent = '▶ Mängi päeva kulgu';
+      playBtn.classList.remove('playing');
+    }
+    setStatus('Päikese liikumine peatatud');
+  } else {
+    if (playBtn) {
+      playBtn.textContent = '⏸ Peata päeva kulg';
+      playBtn.classList.add('playing');
+    }
+    setStatus('▶ Päikese ja varjude liikumine reaalajas...');
+    solarTimelapseTimer = setInterval(() => {
+      let nextH = currentSolarHour + 0.15;
+      if (nextH > 22) nextH = 6;
+      updateSolarStudy(nextH, currentSolarSeason);
+    }, 60);
+  }
+});
+
+// Lähtesta keskpäev
+document.getElementById('btn-solar-reset')?.addEventListener('click', () => {
+  updateSolarStudy(13, currentSolarSeason);
 });
 
 // Sisevalgustite ja hubaste meeleolutulede lüliti
@@ -4545,7 +5420,17 @@ window.addEventListener('keydown', e => {
 
   if (k === 'v') { setDrawMode(null); document.querySelector('[data-tool="select"]')?.click(); }
   if (k === 'g') { document.querySelector('[data-tool="move"]')?.click(); transform.setMode('translate'); }
-  if (k === 'r' && !drawMode && selected?.userData?.movable) { e.preventDefault(); rotateSelected90(); return; }
+  if (k === 'r' && !drawMode && selected?.userData?.movable) {
+    e.preventDefault();
+    if (e.shiftKey) rotateSelectedCCW90();
+    else rotateSelected90();
+    return;
+  }
+  if (k === 'k' && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    toggleFramingMode();
+    return;
+  }
   if (k === 'r') { document.querySelector('[data-tool="rotate"]')?.click(); transform.setMode('rotate'); }
   if (k === 's' && !e.ctrlKey) { document.querySelector('[data-tool="scale"]')?.click(); transform.setMode('scale'); }
   if (k === 'w' && !e.ctrlKey && !isWalking) setDrawMode(drawMode === 'wall' ? null : 'wall');
@@ -4767,6 +5652,8 @@ updateCompassUi();
 renderRoomModules();
 renderDesignStyles();
 runErgoCheck();
+setupFramingController();
+setupGizmoRotationHud();
 resize();
 
 // Põhirenderdus ja jalutuskäigu animatsioon
@@ -4794,6 +5681,7 @@ resize();
   }
   renderer.render(scene, camera);
   renderBlenderGizmo();
+  updateGizmoHud();
   updateFpsCounter();
 })();
 
