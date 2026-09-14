@@ -7,8 +7,11 @@ export const SITE = {
 };
 
 export const WALL_PRESETS = [
+  { id: 'ext_bauroc_375', name: 'Bauroc Ecoterm+ 375 mm poorbetoon (U ~ 0.18)', t: 0.375, h: 2.4, mat: 'bauroc', isExt: true },
+  { id: 'int_bauroc_150', name: 'Bauroc Classic 150 mm vahesein', t: 0.15, h: 2.4, mat: 'bauroc', isExt: false },
+  { id: 'int_bauroc_100', name: 'Bauroc Element 100 mm vahesein', t: 0.10, h: 2.4, mat: 'bauroc', isExt: false },
   { id: 'ext_timber', name: 'Puitkarkass välissein (25 cm)', t: 0.25, h: 2.6, mat: 'wood', isExt: true },
-  { id: 'ext_block', name: 'Bauroc/Fibo plokk välissein (30 cm)', t: 0.30, h: 2.6, mat: 'plaster', isExt: true },
+  { id: 'ext_block', name: 'Bauroc/Fibo plokk välissein (30 cm)', t: 0.30, h: 2.6, mat: 'bauroc', isExt: true },
   { id: 'int_bearing', name: 'Kandev vahesein (15 cm)', t: 0.15, h: 2.6, mat: 'wood', isExt: false },
   { id: 'int_light', name: 'Kipsplaat vahesein (10 cm)', t: 0.10, h: 2.6, mat: 'plaster', isExt: false },
   { id: 'sauna_timber', name: 'Sauna puitsein (12 cm)', t: 0.12, h: 2.35, mat: 'wood', isExt: false },
@@ -31,10 +34,12 @@ export const OPENING_PRESETS = {
 
 export const MATERIALS = {
   wood: { color: 0xc4a574, name: 'Hele puit (vooder/karkass)', eurM2: 45, r: 0.72 },
+  bauroc: { color: 0xdde2e8, name: 'Bauroc Ecoterm+ plokk (poorbetoon)', eurM2: 68, r: 0.85 },
   dark: { color: 0x5a4030, name: 'Tume termopuit', eurM2: 58, r: 0.68 },
+  thermo_aspen: { color: 0x9e623b, name: 'Termohaavast saunavooder / leililava', eurM2: 62, r: 0.6 },
   plaster: { color: 0xf0ece1, name: 'Valge fassaadikrohv', eurM2: 32, r: 0.85 },
   brick: { color: 0xa85038, name: 'Fassaaditellis', eurM2: 65, r: 0.78 },
-  concrete: { color: 0xa4a29a, name: 'Lihvitud betoon', eurM2: 38, r: 0.65 },
+  concrete: { color: 0xa4a29a, name: 'Lihvitud betoon / sokkel', eurM2: 38, r: 0.65 },
   glass: { color: 0xa8d4ed, name: 'Klaas', eurM2: 110, r: 0.1, op: 0.35 },
   tile_gray: { color: 0x767c85, name: 'Hall keraamiline plaat', eurM2: 48, r: 0.4 },
   parquet: { color: 0xb5824c, name: 'Tammeparkett', eurM2: 55, r: 0.5 },
@@ -95,9 +100,13 @@ export const CATALOG = [
       { id: 'toilet', name: 'WC-pott seinapealne', icon: '🚽', eur: 240 },
       { id: 'towelWarmer', name: 'Käterätikuivati redel', icon: '🧣', eur: 170 },
       { id: 'washingMachine', name: 'Pesumasin & kuivati torn', icon: '🧺', eur: 980 },
-      { id: 'stove', name: 'Sauna puuküttega keris', icon: '🔥', eur: 720 },
-      { id: 'lavaLong', name: 'Saunalava (pikk iste)', icon: '🪵', eur: 260 },
-      { id: 'lavaShort', name: 'Saunalava (lühike aste)', icon: '🪵', eur: 150 },
+      { id: 'stove', name: 'Sauna tornkeris saunakividega (HUUM / Harvia)', icon: '🔥', eur: 890 },
+      { id: 'saunaLavaL', name: 'Ergonoomiline L-kujuline leililava (termohaab + LED)', icon: '🪵', eur: 820 },
+      { id: 'saunaLavaStraight', name: 'Kahetasandiline leililava astmega', icon: '🪵', eur: 480 },
+      { id: 'saunaAccessories', name: 'Saunatarvikute komplekt (kibu, kulp, termomeeter)', icon: '🪣', eur: 95 },
+      { id: 'saunaGlassDoor', name: 'Karastatud klaasuks leiliruumi (80x205)', icon: '🚪', eur: 280 },
+      { id: 'lavaLong', name: 'Saunalava (sirge pink)', icon: '🪵', eur: 260 },
+      { id: 'lavaShort', name: 'Saunalava (astmepink)', icon: '🪵', eur: 150 },
     ]
   },
   {

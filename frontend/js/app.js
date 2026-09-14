@@ -18,6 +18,9 @@ import {
   getTileTexture,
   getPaverTexture,
   getRoofTileTexture,
+  getBaurocBlockTexture,
+  getThermoAspenTexture,
+  getFoundationSlabTexture,
 } from './textures.js';
 import {
   LAYER_MATERIALS,
@@ -102,6 +105,36 @@ const framingOptions = {
   includeRoof: true,
 };
 
+// Seinte kihtide 3D läbilõike vaade (nupuga sisse/välja lülitatav jõudluse säästmiseks)
+let showWallLayers3D = false;
+
+function toggleWallLayers3D(forceState) {
+  showWallLayers3D = (forceState !== undefined) ? forceState : !showWallLayers3D;
+
+  const topBtn = document.getElementById('btn-toggle-wall-layers');
+  const wallBtn = document.getElementById('btn-wall-toggle-layers');
+
+  if (topBtn) {
+    topBtn.classList.toggle('active', showWallLayers3D);
+    topBtn.setAttribute('aria-pressed', showWallLayers3D ? 'true' : 'false');
+  }
+  if (wallBtn) {
+    wallBtn.classList.toggle('active', showWallLayers3D);
+    wallBtn.textContent = showWallLayers3D
+      ? '🧱 Lülita kihiline vaade välja (kiire režiim)'
+      : '🧱 Vaata konstruktsioonikihte 3D-s';
+  }
+
+  // Re-build all walls to render multi-layer sandwich geometry or high-speed monolithic boxes
+  rebuildAllWalls();
+
+  if (showWallLayers3D) {
+    setStatus('🧱 Seinakihtide 3D läbilõige sisse lülitatud (Bauroc plokk, soojustus, karkass ja viimistlus)');
+  } else {
+    setStatus('🧱 Tavaline seinavaade taastatud (kiire renderdus)');
+  }
+}
+
 function toggleFramingMode(forceState) {
   isFramingMode = (forceState !== undefined) ? forceState : !isFramingMode;
   
@@ -145,6 +178,8 @@ function refreshFramingModel() {
 }
 
 function setupFramingController() {
+  document.getElementById('btn-toggle-wall-layers')?.addEventListener('click', () => toggleWallLayers3D());
+  document.getElementById('btn-wall-toggle-layers')?.addEventListener('click', () => toggleWallLayers3D());
   document.getElementById('btn-toggle-framing')?.addEventListener('click', () => toggleFramingMode());
   document.getElementById('btn-wall-toggle-framing')?.addEventListener('click', () => toggleFramingMode());
   document.getElementById('btn-framing-close')?.addEventListener('click', () => toggleFramingMode(false));
@@ -326,6 +361,9 @@ const MAT = {
   house: M(0xd8d0b0, { r: 0.8 }),
   roof: M(0x363c44, { r: 0.45, m: 0.25 }),
   concrete: M(0xb0aca4, { r: 0.75, map: getPaverTexture() }),
+  bauroc: M(0xdde2e8, { r: 0.85, map: getBaurocBlockTexture() }),
+  thermo_aspen: M(0x9e623b, { r: 0.6, map: getThermoAspenTexture() }),
+  foundation_slab: M(0x7a8189, { r: 0.72, map: getFoundationSlabTexture() }),
 };
 
 const layers = {
@@ -717,6 +755,8 @@ function getLayerThreeMaterial(matId) {
 
 // Seina viimistlusmaterjal värvipintsli jaoks
 function getWallFinishMaterial(matKey) {
+  if (matKey === 'bauroc') return MAT.bauroc;
+  if (matKey === 'thermo_aspen') return MAT.thermo_aspen;
   if (matKey === 'wood') return MAT.wood;
   if (matKey === 'dark') return MAT.woodD;
   if (matKey === 'plaster') return MAT.house;
@@ -784,13 +824,57 @@ function rebuildWallMesh(w) {
       g.add(socle);
     }
 
-    // Puhas ja sujuv seinaplokk
-    const mesh = box(segLen, h, t, wallFinishMat, 0, h / 2, 0);
-    mesh.position.set(cx, FLOOR_Y + h / 2, cz);
-    mesh.rotation.y = -angle;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    g.add(mesh);
+    // Kui kasutaja lülitas sisse "Vaata seinakihte" nupu, kuvame iga konstruktsioonikihi füüsiliselt:
+    if (showWallLayers3D && asm && asm.layers && asm.layers.length > 1) {
+      const layersList = asm.layers;
+      const totalLayersMm = layersList.reduce((acc, l) => acc + (l.thickMm || 0), 0);
+      let curOffsetM = -(totalLayersMm / 1000) / 2;
+
+      const segGroup = new THREE.Group();
+      segGroup.position.set(cx, FLOOR_Y, cz);
+      segGroup.rotation.y = -angle;
+
+      layersList.forEach((layer, lIdx) => {
+        const layerThickM = Math.max(0.008, (layer.thickMm || 10) / 1000);
+        const centerOffsetM = curOffsetM + layerThickM / 2;
+        curOffsetM += layerThickM;
+
+        let layerMat = wallFinishMat;
+        const mId = (layer.matId || '').toLowerCase();
+        if (mId.includes('bauroc')) {
+          layerMat = MAT.bauroc;
+        } else if (mId.includes('wool') || mId.includes('insulation')) {
+          layerMat = createMaterial(0xeab308, { r: 0.9 }); // Soojustusvill
+        } else if (mId.includes('eps')) {
+          layerMat = createMaterial(0x38bdf8, { r: 0.85 }); // EPS plaat
+        } else if (mId.includes('gypsum') || mId.includes('gyproc')) {
+          layerMat = createMaterial(0xf1f5f9, { r: 0.75 }); // Kipsplaat
+        } else if (mId.includes('barrier') || mId.includes('membrane') || mId.includes('pe')) {
+          layerMat = createMaterial(0x0284c7, { r: 0.3, op: 0.85, transparent: true }); // Aurutõke
+        } else if (mId.includes('cladding') || mId.includes('wood') || mId.includes('timber') || mId.includes('stud')) {
+          layerMat = MAT.wood; // Puitkarkass/vooder
+        } else if (mId.includes('render') || mId.includes('plaster')) {
+          layerMat = MAT.house; // Krohv
+        }
+
+        // Astmeline arhitektuurne lõige, et kihid paistaksid pealt vaadates ja lõikes reljeefselt eristatavad
+        const isOuter = (lIdx === 0 || lIdx === layersList.length - 1);
+        const stepH = isOuter ? h * 0.93 : h;
+        const layerMesh = box(segLen, stepH, layerThickM, layerMat, 0, stepH / 2, centerOffsetM);
+        layerMesh.castShadow = true;
+        layerMesh.receiveShadow = true;
+        segGroup.add(layerMesh);
+      });
+      g.add(segGroup);
+    } else {
+      // Puhas ja sujuv seinaplokk (vaikimisi kiire režiim)
+      const mesh = box(segLen, h, t, wallFinishMat, 0, h / 2, 0);
+      mesh.position.set(cx, FLOOR_Y + h / 2, cz);
+      mesh.rotation.y = -angle;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      g.add(mesh);
+    }
   });
 
   // 2. Avatäited (uksed, aknad) ja avade ümbrus
@@ -1713,79 +1797,97 @@ function clearEditable() {
 // Mallid
 function placeSaunaTemplate() {
   clearEditable();
-  const h = 2.4, t = 0.15;
+  const h = 2.4, t = 0.375; // Bauroc Ecoterm+ 375 mm poorbetoon välisseinad (U ~ 0.18)
   const outline = [
-    { x1: 0, z1: 0, x2: L, z2: 0 },
-    { x1: L, z1: 0, x2: L, z2: W },
-    { x1: L, z1: W, x2: 0, z2: W },
-    { x1: 0, z1: W, x2: 0, z2: 0 },
+    { x1: 0, z1: 0, x2: L, z2: 0, assemblyKey: 'bauroc_ext_375' },
+    { x1: L, z1: 0, x2: L, z2: W, assemblyKey: 'bauroc_ext_375' },
+    { x1: L, z1: W, x2: 0, z2: W, assemblyKey: 'bauroc_ext_375' },
+    { x1: 0, z1: W, x2: 0, z2: 0, assemblyKey: 'bauroc_ext_375' },
   ];
   outline.forEach(s => {
-    walls.push({ id: uid(), ...s, h, t, mat: 'wood', openings: [] });
+    walls.push({ id: uid(), ...s, h, t, mat: 'bauroc', openings: [] });
   });
-  // vaheseinad
+
+  // Bauroc Classic 150 mm siseseinad (krohvitud ja hüdroisoleeritud)
+  // 1. Puhkeruumi ja pesu/leiliruumi vaheline kandev sisesein
   walls.push({
-    id: uid(), x1: FRONT_D, z1: 0, x2: FRONT_D, z2: W, h, t: 0.12, mat: 'wood',
-    openings: [{ type: 'door', along: PESU_W * 0.5, width: 0.8, height: 2.05 }],
+    id: uid(), x1: FRONT_D, z1: 0, x2: FRONT_D, z2: W, h, t: 0.15, mat: 'bauroc', assemblyKey: 'bauroc_int_150',
+    openings: [{ type: 'door', along: PESU_W * 0.5, width: 0.9, height: 2.1 }],
   });
+  // 2. Pesuruumi ja leiliruumi vaheline vahesein koos sauna klaasukse avaga
   walls.push({
-    id: uid(), x1: FRONT_D, z1: PESU_W, x2: L, z2: PESU_W, h, t: 0.12, mat: 'wood',
-    openings: [{ type: 'door', along: BACK_D * 0.45, width: 0.8, height: 2.05 }],
+    id: uid(), x1: FRONT_D, z1: PESU_W, x2: L, z2: PESU_W, h, t: 0.15, mat: 'bauroc', assemblyKey: 'bauroc_int_150',
+    openings: [{ type: 'door', along: 0.55, width: 0.8, height: 2.05 }],
   });
-  // välisuks ja aknad
+
+  // Välisuks ja aknad
+  // Puhkeruumi sissepääsuuks terrassilt (läänesuund)
   walls[3].openings.push({ type: 'door', along: W / 2, width: 1.0, height: 2.1 });
-  walls[0].openings.push({ type: 'window', along: L * 0.4, width: 1.4, height: 1.3, sill: 0.85 });
-  walls[1].openings.push({ type: 'window', along: W * 0.5, width: 0.6, height: 0.6, sill: 1.4 });
+  // Puhkeruumi avar panoraamaken päikese poole (lõunasuund)
+  walls[0].openings.push({ type: 'window', along: FRONT_D * 0.45, width: 1.6, height: 1.3, sill: 0.85 });
+  // Leiliruumi tuulutusaken (karastatud klaas, tagab meeldiva leiliõhu ja vaate)
+  walls[1].openings.push({ type: 'window', along: PESU_W + LEILI_W * 0.68, width: 0.6, height: 0.6, sill: 1.4 });
+  // Pesuruumi loomuliku valguse aken
+  walls[1].openings.push({ type: 'window', along: PESU_W * 0.45, width: 0.6, height: 0.6, sill: 1.4 });
 
   rooms = [
-    { id: uid(), name: 'Puhkeruum (11,0 m²)', x: FRONT_D / 2, z: W / 2, w: FRONT_D, d: W, area: 11.0, floorMat: 'parquet' },
-    { id: uid(), name: 'Pesu (2,5 m²)', x: FRONT_D + BACK_D / 2, z: PESU_W / 2, w: BACK_D, d: PESU_W, area: 2.5, floorMat: 'tile_gray' },
-    { id: uid(), name: 'Leil (5,8 m²)', x: FRONT_D + BACK_D / 2, z: PESU_W + LEILI_W / 2, w: BACK_D, d: LEILI_W, area: 5.8, floorMat: 'wood' },
+    { id: uid(), name: 'Puhkeruum (10,9 m²)', x: FRONT_D / 2, z: W / 2, w: FRONT_D, d: W, area: 10.9, floorMat: 'parquet', floorAssembly: 'ground_slab_heated' },
+    { id: uid(), name: 'Pesu & Dušš (2,5 m²)', x: FRONT_D + BACK_D / 2, z: PESU_W / 2, w: BACK_D, d: PESU_W, area: 2.5, floorMat: 'tile_gray', floorAssembly: 'ground_slab_tile' },
+    { id: uid(), name: 'Leiliruum (5,8 m²)', x: FRONT_D + BACK_D / 2, z: PESU_W + LEILI_W / 2, w: BACK_D, d: LEILI_W, area: 5.8, floorMat: 'tile_gray', floorAssembly: 'ground_slab_tile' },
   ];
 
   rebuildAllWalls();
 
-  // Modernne L-kujuline ümbritsev terrass ja integreeritud tünnisaun
-  // 1. Sauna ees olev avar lõunaterrass (ühendatud laiaks platvormiks)
+  // 1. Plaatvundament sauna alusel (soojustatud raudbetoonplaat + L-sokkel + EPS + killustikupadi)
+  addAsset('foundationSlab', L / 2, W / 2);
+
+  // 2. Ergonoomiline ja professionaalselt paigutatud leiliruum:
+  // - Ergonoomiline L-leililava (termohaab, kumer seljatugi, peatoed, integreeritud LED-peitvalgustus ja turvaliistud)
+  addAsset('saunaLavaL', 3.82, 2.76, 0);
+  // - Kaasaegne roostevaba tornkeris saunakividega, kuumakaitseplaadi, korstna ja puidust turvapiirdega
+  addAsset('stove', 4.38, 1.58, 0);
+  // - Saunatarvikute komplekt (leilikibu veega, puidust saunakulp, termomeeter/hügromeeter, kaseviht)
+  addAsset('saunaAccessories', 4.36, 2.30, 0);
+  // - Karastatud klaasuks leiliruumi vaheseinas
+  addAsset('saunaGlassDoor', FRONT_D + 0.55, PESU_W, 0);
+
+  // 3. Pesuruum (plaaditud põrand küttega):
+  addAsset('shower', 3.35, 0.48);
+  addAsset('towelWarmer', 4.55, 0.18);
+  addAsset('bathroomVanity', 4.42, 0.70);
+
+  // 4. Puhkeruum (avatud panoraamvaade ja soojus):
+  addAsset('sofa', 1.4, 1.1);
+  addAsset('modernHangingFireplace', 2.3, 1.1);
+
+  // 5. Modernne L-kujuline ümbritsev terrass ja integreeritud kümblustünn
   addAsset('deckModule', 1.0, W + 1.6);
   addAsset('deckModule', 4.0, W + 1.6);
-  // 2. Sauna parempoolne külgterrass (spa tsoon)
   addAsset('deckModule', L + 1.5, 1.2);
-  // 3. Täisintegreeritud kümblustünn terrassi sisse süvistatuna (koos puidust krae, LED-valgusrõnga ja astmetega)
   addAsset('hotTubIntegrated', L + 1.8, W + 1.6);
-  // 4. Modernne välimööbli L-lounge terrassil
   addAsset('modernLounge', 1.0, W + 1.6);
-  // 5. Minimalistlik gaasi-tulelaud klaaskaitse ja elava leegiga
   addAsset('modernFireTable', 1.0, W + 2.8);
-  // 6. Termopuidust ribi-tuulesein terrassi lääneservas privaatsuseks ja tuulekaitseks
   addAsset('slatScreenModern', -1.1, W + 1.6, Math.PI / 2);
-  // 7. Päikesetool spa-terrassil tünni kõrval
   addAsset('sunLoungerModern', L + 3.4, 1.2, Math.PI / 2);
-  // 8. Minimalistlikud mustad terrassipollarid valgustuseks
   addAsset('modernBollard', -1.0, W + 3.1);
   addAsset('modernBollard', L + 3.6, W + 3.4);
-  // 9. Looduslik aed, männid ja kivid
+
+  // 6. Looduslik aed, männid ja kivitee
   addAsset('pond', L + 5.2, -3.2);
   addAsset('pine', -4.5, W + 4.5, 0, 1.6);
   addAsset('pine', L + 4.5, W + 6.5, 0, 1.8);
   addAsset('birch', -6.5, -2, 0, 1.3);
   addAsset('stonePath', 1.0, W + 3.6);
   addAsset('stonePath', L + 1.8, W + 3.6);
-  // 10. Siseruumid ja modernne rippkamin
-  addAsset('sofa', 1.4, 1.0);
-  addAsset('modernHangingFireplace', 2.3, 1.0);
-  addAsset('stove', 4.4, 3.2);
-  addAsset('lavaLong', 4.5, 2.3);
-  addAsset('shower', 4.4, 0.45);
 
   roofConfig.type = 'gable';
   roofConfig.pitch = 22;
   roofConfig.material = 'roof_dark';
   rebuildRoof();
 
-  pushHist('Mall: Modernne saunakompleks ja integreeritud terrass');
+  pushHist('Mall: Bauroc saunamaja plaatvundamendil');
   refreshList();
-  setStatus('✅ Laaditud modernne saunakompleks integreeritud terrassi ja tünniga');
+  setStatus('✅ Laaditud Bauroc saunamaja plaatvundamendil ja ergonoomiline leiliruum');
 }
 
 function placeHouseTemplate() {
@@ -2190,6 +2292,7 @@ function applyProps() {
 ['p-x', 'p-y', 'p-z', 'p-ry', 'p-s', 'p-wh', 'p-wt', 'p-mat', 'p-name', 'p-floor-mat', 'p-wall-assembly', 'p-floor-assembly', 'p-furniture-finish'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', applyProps);
 });
+document.getElementById('p-ry')?.addEventListener('input', applyProps);
 
 // Kiirvaliku värvinupud (swatches)
 document.querySelectorAll('#finish-swatches-row .swatch-btn').forEach(btn => {
@@ -2489,7 +2592,7 @@ function setupGizmoRotationHud() {
       dialStartAngle = selected.rotation.y;
       if (angleTag) {
         angleTag.classList.remove('hidden');
-        angleTag.textContent = `${Math.round(THREE.MathUtils.radToDeg(selected.rotation.y))}°`;
+        angleTag.textContent = `📐 ${Math.round(THREE.MathUtils.radToDeg(selected.rotation.y))}°`;
       }
 
       const onMouseMove = ev => {
@@ -2534,6 +2637,50 @@ function setupGizmoRotationHud() {
     });
   }
 
+  // Interaktiivne liugur noolte kohal
+  const rotSlider = document.getElementById('gizmo-rot-slider');
+  if (rotSlider) {
+    rotSlider.addEventListener('input', e => {
+      e.stopPropagation();
+      if (!selected || !selected.userData?.movable) return;
+      const deg = parseInt(e.target.value, 10) || 0;
+      selected.rotation.y = THREE.MathUtils.degToRad(deg);
+      syncProps();
+      clampSel();
+      updateGizmoAngleReadout(deg);
+      if (angleTag) {
+        angleTag.classList.remove('hidden');
+        angleTag.textContent = `📐 ${deg}°`;
+      }
+    });
+    rotSlider.addEventListener('change', () => {
+      pushHist();
+      runErgoCheck();
+      if (angleTag) angleTag.classList.add('hidden');
+      if (selected) {
+        const deg = ((Math.round(THREE.MathUtils.radToDeg(selected.rotation.y)) % 360) + 360) % 360;
+        setStatus(`Objekti nurk: ${deg}°`);
+      }
+    });
+  }
+
+  // Kiirklahvid levinud nurkadele (0°, 90°, 180°, 270°)
+  document.querySelectorAll('.gizmo-pill-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (!selected || !selected.userData?.movable) return;
+      const deg = parseInt(btn.dataset.angle, 10) || 0;
+      selected.rotation.y = THREE.MathUtils.degToRad(deg);
+      syncProps();
+      clampSel();
+      pushHist();
+      runErgoCheck();
+      updateGizmoAngleReadout(deg);
+      setStatus(`Objekti nurk määratud: ${deg}°`);
+    });
+  });
+
+  // 90° pööramisnupud nii hõljuval gizmol kui alumisel tööriistaribal
   document.getElementById('btn-gizmo-rot-left')?.addEventListener('click', e => {
     e.stopPropagation();
     rotateSelectedCCW90();
@@ -2567,7 +2714,7 @@ function updateGizmoHud() {
   const target3D = new THREE.Vector3(worldPos.x, topY + 0.2, worldPos.z);
   target3D.project(camera);
 
-  if (target3D.z > 1.0) {
+  if (target3D.z > 1.0 || target3D.z < -1.0) {
     hud.classList.add('hidden');
     if (angleTag) angleTag.classList.add('hidden');
     return;
@@ -2581,8 +2728,8 @@ function updateGizmoHud() {
   const screenX = (target3D.x * 0.5 + 0.5) * w;
   const screenY = (-target3D.y * 0.5 + 0.5) * h;
 
-  const clampedX = Math.max(80, Math.min(w - 80, screenX));
-  const clampedY = Math.max(50, Math.min(h - 50, screenY));
+  const clampedX = Math.max(120, Math.min(w - 120, screenX));
+  const clampedY = Math.max(45, Math.min(h - 90, screenY));
 
   hud.style.left = `${clampedX}px`;
   hud.style.top = `${clampedY}px`;
@@ -2590,7 +2737,7 @@ function updateGizmoHud() {
 
   if (angleTag) {
     angleTag.style.left = `${clampedX}px`;
-    angleTag.style.top = `${clampedY}px`;
+    angleTag.style.top = `${clampedY - 35}px`;
   }
 
   const deg = ((Math.round(THREE.MathUtils.radToDeg(selected.rotation.y)) % 360) + 360) % 360;
@@ -2604,6 +2751,14 @@ function updateGizmoAngleReadout(deg) {
   if (needle) needle.style.transform = `translateX(-50%) rotate(${deg}deg)`;
   const toolbarBadge = document.getElementById('toolbar-rot-badge');
   if (toolbarBadge) toolbarBadge.textContent = `${deg}°`;
+  const rotSlider = document.getElementById('gizmo-rot-slider');
+  if (rotSlider && document.activeElement !== rotSlider) {
+    rotSlider.value = deg;
+  }
+  const pRy = document.getElementById('p-ry');
+  if (pRy && document.activeElement !== pRy) {
+    pRy.value = deg;
+  }
 }
 
 function cloneSelected() {
@@ -5455,6 +5610,23 @@ window.addEventListener('keydown', e => {
   }
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undo(); }
   if ((e.ctrlKey || e.metaKey || e.shiftKey) && k === 'd') { e.preventDefault(); cloneSelected(); return; }
+
+  // Külgpaneelide ja Zen-vaate kiirklahvid
+  if (k === '[' || k === '{') {
+    e.preventDefault();
+    toggleCatalogPanel();
+    return;
+  }
+  if (k === ']' || k === '}') {
+    e.preventDefault();
+    togglePropsPanel();
+    return;
+  }
+  if (code === 'F10' || k === '\\' || (k === 'z' && (e.altKey || e.shiftKey))) {
+    e.preventDefault();
+    toggleZenMode();
+    return;
+  }
 });
 
 window.addEventListener('keyup', e => {
@@ -5477,6 +5649,105 @@ function resize() {
   cameraOrtho.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
+
+// Automaatne dünaamiline ResizeObserver töölauale
+const vpEl = document.getElementById('viewport');
+if (window.ResizeObserver && vpEl) {
+  const ro = new ResizeObserver(() => {
+    resize();
+  });
+  ro.observe(vpEl);
+}
+
+// ========== KÜLGPANEELIDE KOKKUPAKKIMINE & ZEN-MODE (KOMPAKTNE LIIDES) ==========
+function toggleCatalogPanel(force) {
+  const ws = document.getElementById('workspace');
+  if (!ws) return;
+  const isCurrentlyCollapsed = ws.classList.contains('catalog-collapsed');
+  const shouldCollapse = (force !== undefined) ? !force : !isCurrentlyCollapsed;
+
+  ws.classList.toggle('catalog-collapsed', shouldCollapse);
+
+  const topBtn = document.getElementById('btn-toggle-catalog-top');
+  const edgeBtn = document.getElementById('btn-edge-toggle-catalog');
+  const edgeIcon = edgeBtn?.querySelector('.edge-tab-icon');
+
+  if (topBtn) {
+    topBtn.classList.toggle('active', shouldCollapse);
+    topBtn.title = shouldCollapse ? 'Ava vasak tööriistariba (Kiirklahv: [)' : 'Peida vasak tööriistariba (Kiirklahv: [)';
+  }
+  if (edgeBtn) {
+    edgeBtn.title = shouldCollapse ? 'Ava vasak tööriistariba (Kiirklahv: [)' : 'Peida vasak tööriistariba (Kiirklahv: [)';
+  }
+  if (edgeIcon) {
+    edgeIcon.textContent = shouldCollapse ? '▶' : '◀';
+  }
+
+  resize();
+  setTimeout(resize, 60);
+  setTimeout(resize, 200);
+
+  setStatus(shouldCollapse ? 'Vasak tööriistariba peidetud (ruumi säästetud disainile, ava klahviga [)' : 'Vasak tööriistariba avatud');
+}
+
+function togglePropsPanel(force) {
+  const ws = document.getElementById('workspace');
+  if (!ws) return;
+  const isCurrentlyCollapsed = ws.classList.contains('props-collapsed');
+  const shouldCollapse = (force !== undefined) ? !force : !isCurrentlyCollapsed;
+
+  ws.classList.toggle('props-collapsed', shouldCollapse);
+
+  const topBtn = document.getElementById('btn-toggle-props-top');
+  const edgeBtn = document.getElementById('btn-edge-toggle-props');
+  const edgeIcon = edgeBtn?.querySelector('.edge-tab-icon');
+
+  if (topBtn) {
+    topBtn.classList.toggle('active', shouldCollapse);
+    topBtn.title = shouldCollapse ? 'Ava parem inspektor (Kiirklahv: ])' : 'Peida parem inspektor (Kiirklahv: ])';
+  }
+  if (edgeBtn) {
+    edgeBtn.title = shouldCollapse ? 'Ava parem inspektor (Kiirklahv: ])' : 'Peida parem inspektor (Kiirklahv: ])';
+  }
+  if (edgeIcon) {
+    edgeIcon.textContent = shouldCollapse ? '◀' : '▶';
+  }
+
+  resize();
+  setTimeout(resize, 60);
+  setTimeout(resize, 200);
+
+  setStatus(shouldCollapse ? 'Parem inspektor peidetud (ava klahviga ])' : 'Parem inspektor avatud');
+}
+
+function toggleZenMode(force) {
+  const ws = document.getElementById('workspace');
+  if (!ws) return;
+  const isCurrentlyZen = ws.classList.contains('zen-mode');
+  const shouldZen = (force !== undefined) ? force : !isCurrentlyZen;
+
+  ws.classList.toggle('zen-mode', shouldZen);
+
+  const btnZen = document.getElementById('btn-toggle-zen');
+  if (btnZen) {
+    btnZen.classList.toggle('active', shouldZen);
+  }
+
+  resize();
+  setTimeout(resize, 60);
+  setTimeout(resize, 200);
+
+  setStatus(shouldZen ? '⛶ Zen-vaade: maksimaalne ruum 3D disainile (välju nupuga või F10 / \\)' : 'Tavavaade taastatud');
+}
+
+// Paneelide lülitite sündmused
+document.getElementById('btn-toggle-catalog-top')?.addEventListener('click', () => toggleCatalogPanel());
+document.getElementById('btn-toggle-props-top')?.addEventListener('click', () => togglePropsPanel());
+document.getElementById('btn-collapse-catalog')?.addEventListener('click', () => toggleCatalogPanel(false));
+document.getElementById('btn-collapse-props')?.addEventListener('click', () => togglePropsPanel(false));
+document.getElementById('btn-edge-toggle-catalog')?.addEventListener('click', () => toggleCatalogPanel());
+document.getElementById('btn-edge-toggle-props')?.addEventListener('click', () => togglePropsPanel());
+document.getElementById('btn-toggle-zen')?.addEventListener('click', () => toggleZenMode());
 
 // Blender 3D Orientation Navigation Gizmo ja renderdus
 const gizmoCanvas = document.getElementById('gizmo-canvas');

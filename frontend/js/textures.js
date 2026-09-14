@@ -389,3 +389,137 @@ export function getRoofTileTexture(isRed = false) {
   return tex;
 }
 
+// 12. Bauroc poorbetoonploki tekstuur (600x200mm plokijaotus ja õhukesed liimvuugid)
+export function getBaurocBlockTexture() {
+  if (textureCache.has('bauroc')) return textureCache.get('bauroc');
+  const tex = createProceduralCanvas(512, 512, (ctx, w, h) => {
+    // Alusvärv: Baurocile omane hele mineraalne hallikasvalge
+    ctx.fillStyle = '#dde2e8';
+    ctx.fillRect(0, 0, w, h);
+
+    // Poorbetooni mikropoorid ja kvartsi terad
+    for (let i = 0; i < 4000; i++) {
+      const px = Math.random() * w;
+      const py = Math.random() * h;
+      const r = 0.6 + Math.random() * 1.4;
+      ctx.fillStyle = Math.random() > 0.45 ? 'rgba(175, 185, 195, 0.35)' : 'rgba(255, 255, 255, 0.5)';
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Bauroc plokijaotus: 4 rida plokke (kursust), iga rida poolkivi seotises
+    const rows = 4;
+    const cols = 2;
+    const rowH = h / rows;
+    const colW = w / cols;
+
+    for (let r = 0; r <= rows; r++) {
+      const y = r * rowH;
+      // Horisontaalne liimvuuk (õhuke 2-3 mm vuuk)
+      ctx.fillStyle = '#9ca6b2';
+      ctx.fillRect(0, y - 1.5, w, 3);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillRect(0, y + 1.5, w, 1.5);
+    }
+
+    for (let r = 0; r < rows; r++) {
+      const y = r * rowH;
+      const shiftX = (r % 2 === 0) ? 0 : colW / 2;
+      for (let c = -1; c <= cols + 1; c++) {
+        const x = c * colW + shiftX;
+        // Vertikaalne liimvuuk
+        ctx.fillStyle = '#9ca6b2';
+        ctx.fillRect(x - 1.5, y, 3, rowH);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fillRect(x + 1.5, y, 1.5, rowH);
+
+        // Ploki fasseti/serva kerge varjund
+        const grad = ctx.createLinearGradient(x, y, x + colW, y);
+        grad.addColorStop(0, 'rgba(0, 0, 0, 0.04)');
+        grad.addColorStop(0.08, 'rgba(255, 255, 255, 0.04)');
+        grad.addColorStop(0.92, 'rgba(0, 0, 0, 0.0)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0.05)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x + 3, y + 3, colW - 6, rowH - 6);
+      }
+    }
+  });
+  tex.repeat.set(2, 2);
+  textureCache.set('bauroc', tex);
+  return tex;
+}
+
+// 13. Termohaava / leililava puitliistude tekstuur
+export function getThermoAspenTexture() {
+  if (textureCache.has('thermo_aspen')) return textureCache.get('thermo_aspen');
+  const tex = createProceduralCanvas(256, 256, (ctx, w, h) => {
+    // Soe sametine termotöödeldud haavapuu / lepp
+    ctx.fillStyle = '#9e623b';
+    ctx.fillRect(0, 0, w, h);
+
+    const slatCount = 8;
+    const slatH = h / slatCount;
+
+    for (let i = 0; i < slatCount; i++) {
+      const y = i * slatH;
+      // Puidusüü ja soojad nüansid
+      const rand = (Math.random() - 0.5) * 16;
+      ctx.fillStyle = `rgb(${158 + rand}, ${98 + rand * 0.7}, ${59 + rand * 0.5})`;
+      ctx.fillRect(0, y + 2, w, slatH - 4);
+
+      // Peened lainjad puusüüd
+      for (let s = 0; s < 5; s++) {
+        const sy = y + 4 + Math.random() * (slatH - 8);
+        ctx.strokeStyle = 'rgba(92, 52, 28, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, sy);
+        ctx.bezierCurveTo(w * 0.3, sy + (Math.random() - 0.5) * 2, w * 0.7, sy + (Math.random() - 0.5) * 2, w, sy);
+        ctx.stroke();
+      }
+
+      // Liistude vaheline must varjusoon (15 mm shadow gap)
+      ctx.fillStyle = '#221208';
+      ctx.fillRect(0, y + slatH - 2, w, 2.5);
+      // Ümar ülaserv ja esiletõst
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+      ctx.fillRect(0, y + 2, w, 1.2);
+    }
+  });
+  tex.repeat.set(2, 2);
+  textureCache.set('thermo_aspen', tex);
+  return tex;
+}
+
+// 14. Plaatvundamendi raudbetooni ja sokli tekstuur
+export function getFoundationSlabTexture() {
+  if (textureCache.has('foundation_slab')) return textureCache.get('foundation_slab');
+  const tex = createProceduralCanvas(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#7a8189';
+    ctx.fillRect(0, 0, w, h);
+
+    // Betooni liivaterad ja killustik
+    for (let i = 0; i < 2000; i++) {
+      const x = Math.random() * w;
+      const y = Math.random() * h;
+      const r = 0.5 + Math.random() * 1.5;
+      ctx.fillStyle = Math.random() > 0.5 ? 'rgba(50, 55, 60, 0.3)' : 'rgba(200, 210, 220, 0.35)';
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Raketise jäljed ja vuugid
+    for (let y = 0; y < h; y += 64) {
+      ctx.fillStyle = 'rgba(40, 45, 50, 0.4)';
+      ctx.fillRect(0, y, w, 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.fillRect(0, y + 2, w, 1);
+    }
+  });
+  tex.repeat.set(2, 2);
+  textureCache.set('foundation_slab', tex);
+  return tex;
+}
+

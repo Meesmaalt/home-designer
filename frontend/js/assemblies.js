@@ -401,6 +401,17 @@ export const WALL_ASSEMBLIES = {
       { matId: 'render_int_10', thickMm: 10 },
     ],
   },
+  bauroc_int_150: {
+    id: 'bauroc_int_150',
+    name: 'Bauroc Classic 150 mm vahesein (krohvitud)',
+    type: 'interior',
+    desc: 'Tulekindel ja helipidav poorbetoonist sisesein niiskuskindla krohvi ja hüdroisolatsiooniga',
+    layers: [
+      { matId: 'render_int_10', thickMm: 10 },
+      { matId: 'block_partition_100', thickMm: 130 },
+      { matId: 'render_int_10', thickMm: 10 },
+    ],
+  },
 };
 
 export const FLOOR_ASSEMBLIES = {

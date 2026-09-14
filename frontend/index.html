@@ -29,10 +29,11 @@
       </div>
 
       <div class="top-actions" aria-label="Projekti toimingud">
+        <button id="btn-toggle-catalog-top" class="icon-button" title="Peida / Näita vasakut tööriistariba (Kiirklahv: [)" aria-label="Lülita vasak paneel">◧</button>
         <div class="template-selector-wrap">
           <select id="template-select" title="Laadi näidisprojekt või alusta tühjalt">
             <option value="" disabled selected>📂 Näidisprojektid…</option>
-            <option value="sauna">Saunakompleks ja tiik</option>
+            <option value="sauna">Bauroc saunamaja (plaatvundament + leiliruum)</option>
             <option value="house">Kaasaegne pereelamu ja aed</option>
             <option value="garden_shed">Aiamaja, kasvuhoone ja terrass</option>
             <option value="empty">Tühi krunt (alusta puhtalt)</option>
@@ -42,14 +43,17 @@
         <span class="top-divider"></span>
         <button id="btn-new" title="Alusta uut projekti"><span>＋</span><span class="button-label">Uus</span></button>
         <button id="btn-open" title="Ava projekt failist"><span>↥</span><span class="button-label">Ava</span></button>
-        <button id="btn-save" title="Laadi projekt failina alla"><span>↓</span><span class="button-label">Laadi alla</span></button>
+        <button id="btn-save" title="Laadi projekt failina alla"><span>↓</span><span class="button-label">Laadi</span></button>
         <button id="btn-cloud-save" class="primary" title="Salvesta konto alla"><span>☁</span><span class="button-label">Salvesta</span></button>
         <span class="top-divider"></span>
         <button id="btn-open-blueprint" title="Arhitektuurne korruseplaan ja mõõtkava vaade"><span>📐</span><span class="button-label">Plaan (2D)</span></button>
         <button id="btn-open-3d-export" title="Ekspordi 3D-mudel (OBJ / GLTF / IFC)"><span>📦</span><span class="button-label">3D Mudel</span></button>
-        <button id="btn-open-energy" title="Hoone energiamärgis & soojuskalkulaator"><span>⚡</span><span class="button-label">Energiamärgis</span></button>
-        <button id="btn-open-sun-study" title="Päikese ja varjude reaalajas simulatsioon (Sun & Shadow Study)"><span>☀️</span><span class="button-label">Päike & Varjud</span></button>
-        <button id="btn-toggle-framing" title="Puitkarkassi ja seinakihtide insenerivaade (Kiirklahv: F)"><span>🏗️</span><span class="button-label">Karkass & Kihid</span></button>
+        <button id="btn-open-energy" title="Hoone energiamärgis & soojuskalkulaator"><span>⚡</span><span class="button-label">Energia</span></button>
+        <button id="btn-open-sun-study" title="Päikese ja varjude reaalajas simulatsioon"><span>☀️</span><span class="button-label">Päike</span></button>
+        <button id="btn-toggle-wall-layers" title="Vaata seinte ja konstruktsioonide kihte 3D-s"><span>🧱</span><span class="button-label">Kihid</span></button>
+        <button id="btn-toggle-framing" title="Puitkarkassi ja seinakihtide insenerivaade (Kiirklahv: F)"><span>🏗️</span><span class="button-label">Karkass</span></button>
+        <button id="btn-toggle-zen" class="icon-button" title="Zen-vaade / Täisekraan (Peida külgpaneelid ja näe ainult 3D disaini - F10 / Z)" aria-label="Täisekraan">⛶</button>
+        <button id="btn-toggle-props-top" class="icon-button" title="Peida / Näita paremat inspektorit (Kiirklahv: ])" aria-label="Lülita parem inspektor">◨</button>
         <button id="btn-my-projects" class="icon-button" title="Minu projektid" aria-label="Minu projektid">▤</button>
         <input type="file" id="file-open" accept=".json,application/json" hidden />
         <span class="auth-chip">
@@ -68,6 +72,7 @@
             <span class="eyebrow">Tööriistakogu</span>
             <h2>Planeeri ja ehita</h2>
           </div>
+          <button type="button" id="btn-collapse-catalog" class="panel-collapse-btn" title="Peida vasak paneel (Kiirklahv: [)">◀</button>
         </div>
 
         <nav class="catalog-tabs" aria-label="Tööriistade rühmad">
@@ -328,6 +333,14 @@
       <main id="viewport">
         <canvas id="c" aria-label="Kodu, aia ja hoone 3D tööala"></canvas>
 
+        <!-- Külgpaneelide kiiravamise / peitmise ujuknupud -->
+        <button type="button" id="btn-edge-toggle-catalog" class="edge-panel-tab edge-left" title="Peida / Ava vasak tööriistariba (Kiirklahv: [)" aria-label="Lülita vasak paneel">
+          <span class="edge-tab-icon">◀</span>
+        </button>
+        <button type="button" id="btn-edge-toggle-props" class="edge-panel-tab edge-right" title="Peida / Ava parem inspektor (Kiirklahv: ])" aria-label="Lülita parem paneel">
+          <span class="edge-tab-icon">▶</span>
+        </button>
+
         <div class="viewport-top">
           <div class="scene-title">
             <span class="scene-dot"></span>
@@ -521,15 +534,17 @@
         <!-- VALITUD OBJEKTI TRANSFORM TOOLBAR -->
         <div id="toolbar" aria-label="Valitud objekti tööriistad">
           <button data-tool="select" class="active" title="Vali (V)"><span>↖</span> Vali</button>
-          <button data-tool="move" title="Liiguta (G)"><span>✥</span> Liiguta</button>
-          <button data-tool="rotate" title="Pööra (R)"><span>↻</span> Pööra</button>
+          <button data-tool="move" title="Liiguta nooltega (G)"><span>✥</span> Liiguta</button>
+          <!-- Noolte kõrval kohesed 90° pööramise nupud ilma režiimi vahetamata -->
+          <button id="btn-rotate-ccw-90" class="toolbar-rot-btn" title="Pööra 90° vastupäeva (⟲ -90°)"><span>⟲</span> -90°</button>
+          <button id="btn-rotate-90" class="toolbar-rot-btn primary-rot" title="Pööra 90° päripäeva (⟳ +90°)"><span>⟳</span> <strong>+90°</strong></button>
+          <span id="toolbar-rot-badge" class="badge" title="Valitud objekti pöördenurk" style="font-size:0.75rem; font-weight:700; color:#fbbf24; padding:2px 7px; background:rgba(0,0,0,0.35); border-radius:6px;">0°</span>
+          <span class="sep"></span>
+          <button data-tool="rotate" title="Pööra 3D ringidega (R)"><span>↻</span> Pööra</button>
           <button data-tool="scale" title="Muuda suurust (S)"><span>⤢</span> Suurus</button>
           <span class="sep"></span>
           <button id="btn-snap-wall" title="Joonda seljaga lähima seina vastu"><span>🧲</span> Seina äärde</button>
           <button id="btn-center-room" title="Paiguta ruumi keskele"><span>↔</span> Keskele</button>
-          <button id="btn-rotate-ccw-90" title="Pööra 90° vastupäeva (⟲ -90°)"><span>⟲</span> -90°</button>
-          <button id="btn-rotate-90" title="Pööra 90° päripäeva (⟳ +90°)"><span>⟳</span> +90°</button>
-          <span id="toolbar-rot-badge" class="badge" title="Valitud objekti pöördenurk" style="font-size:0.75rem; font-weight:700; color:#fbbf24; padding:2px 6px;">0°</span>
           <span class="sep"></span>
           <button id="btn-open-assembly-tool" title="Konstruktsiooni kihid ja ristlõiked (Seinad & Põrandad)"><span>📐</span> Kihid</button>
           <span class="sep"></span>
@@ -537,18 +552,32 @@
           <button id="btn-del" class="danger icon-button" title="Kustuta (Delete)" aria-label="Kustuta" disabled>⌫</button>
         </div>
 
-        <!-- HÕLJUV GIZMO PÖÖRAMISE WIDGET (OTSE NOOLTE JUURES) -->
-        <div id="gizmo-rotation-hud" class="gizmo-rotation-hud hidden">
-          <button type="button" id="btn-gizmo-rot-left" class="gizmo-rot-btn" title="Pööra 90° vastupäeva (⟲ -90°)">⟲ -90°</button>
+        <!-- HÕLJUV GIZMO PÖÖRAMISE WIDGET (OTSE 3D NOOLTE JUURES) -->
+        <div id="gizmo-rotation-hud" class="gizmo-rotation-hud hidden" role="toolbar" aria-label="Pööramise juhtnupud noolte juures">
+          <button type="button" id="btn-gizmo-rot-left" class="gizmo-rot-btn" title="Pööra 90° vastupäeva (⟲ -90°)">
+            <span>⟲</span> <strong>-90°</strong>
+          </button>
           
-          <div class="gizmo-rot-dial-container" id="gizmo-rot-dial-container" title="Lohista hiirega vabaks pööramiseks (Shift = vaba sujuv nurk)">
-            <div class="gizmo-rot-dial" id="gizmo-rot-dial">
-              <div class="gizmo-rot-needle" id="gizmo-rot-needle"></div>
+          <div class="gizmo-rot-interactive-wrap">
+            <div class="gizmo-rot-dial-container" id="gizmo-rot-dial-container" title="Lohista hiirega vabaks pööramiseks">
+              <div class="gizmo-rot-dial" id="gizmo-rot-dial">
+                <div class="gizmo-rot-needle" id="gizmo-rot-needle"></div>
+              </div>
             </div>
-            <span class="gizmo-rot-badge" id="gizmo-rot-badge">0°</span>
+            <input type="range" id="gizmo-rot-slider" min="0" max="360" step="5" value="0" title="Keera objekti kraadide kaupa (0° - 360°)" />
+            <span class="gizmo-rot-badge" id="gizmo-rot-badge" title="Täpne pöördenurk">0°</span>
           </div>
 
-          <button type="button" id="btn-gizmo-rot-right" class="gizmo-rot-btn" title="Pööra 90° päripäeva (⟳ +90°)">⟳ +90°</button>
+          <button type="button" id="btn-gizmo-rot-right" class="gizmo-rot-btn primary-rot-btn" title="Pööra 90° päripäeva (⟳ +90°)">
+            <span>⟳</span> <strong>+90°</strong>
+          </button>
+
+          <div class="gizmo-quick-angles" title="Kiirnurgad">
+            <button type="button" class="gizmo-pill-btn" data-angle="0">0°</button>
+            <button type="button" class="gizmo-pill-btn" data-angle="90">90°</button>
+            <button type="button" class="gizmo-pill-btn" data-angle="180">180°</button>
+            <button type="button" class="gizmo-pill-btn" data-angle="270">270°</button>
+          </div>
         </div>
 
         <!-- Hõljuv kraadide tag pööramise ajal 3D noolte kõrval -->
@@ -636,6 +665,7 @@
       <!-- PAREM INSPECTOR & EHITUSINFO -->
       <aside id="props-panel">
         <div class="panel-heading inspector-heading">
+          <button type="button" id="btn-collapse-props" class="panel-collapse-btn" title="Peida parem paneel (Kiirklahv: ])">▶</button>
           <div>
             <span class="eyebrow">Inspektor & Ehitus</span>
             <h2>Elemendi parameetrid</h2>
@@ -680,6 +710,7 @@
               </label>
               <div id="wall-assembly-mini" class="wide assembly-mini-wrap"></div>
               <button type="button" id="btn-open-wall-assembly" class="secondary-btn block wide" style="font-size:0.78rem; padding:0.45rem;">🔬 Ava seina kihiline ristlõige & U-arv</button>
+              <button type="button" id="btn-wall-toggle-layers" class="secondary-btn block wide" style="font-size:0.78rem; padding:0.45rem; margin-top:0.35rem; background:rgba(2,132,199,0.14); border-color:rgba(2,132,199,0.5); color:#0284c7;">🧱 Vaata konstruktsioonikihte 3D-s</button>
               <button type="button" id="btn-wall-toggle-framing" class="secondary-btn block wide" style="font-size:0.78rem; padding:0.45rem; margin-top:0.35rem; background:rgba(217,119,6,0.15); border-color:rgba(217,119,6,0.5); color:#f59e0b;">🏗️ Lülita karkassi & kihtide 3D vaadet</button>
             </div>
 

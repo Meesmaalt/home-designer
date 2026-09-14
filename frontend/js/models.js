@@ -11,6 +11,9 @@ import {
   getBoucleTexture,
   getWalnutTexture,
   getLeatherTexture,
+  getBaurocBlockTexture,
+  getThermoAspenTexture,
+  getFoundationSlabTexture,
 } from './textures.js';
 
 export function createMaterial(color, options = {}) {
@@ -109,13 +112,38 @@ const MAT = {
   blackMetal: createMaterial(0x1a1d22, { m: 0.8, r: 0.3 }),
   charcoalConcrete: createMaterial(0x383d44, { r: 0.75, map: getPaverTexture() }),
   glassWindguard: createMaterial(0xe8f4fa, { op: 0.35, side: THREE.DoubleSide, r: 0.05 }),
+  bauroc: createMaterial(0xdde2e8, { r: 0.85, map: getBaurocBlockTexture() }),
+  thermoAspen: createMaterial(0x9e623b, { r: 0.55, map: getThermoAspenTexture() }),
+  saunaStone: createMaterial(0x383e44, { r: 0.9, m: 0.08 }),
+  stainlessSteel: createMaterial(0xd4d8dc, { m: 0.88, r: 0.22 }),
+  saunaGlass: createMaterial(0xc59f72, { op: 0.42, side: THREE.DoubleSide, r: 0.08, m: 0.05 }),
+  heatShield: createMaterial(0x424850, { r: 0.7 }),
+  darkSocle: createMaterial(0x282c32, { r: 0.82 }),
+  epsBlue: createMaterial(0x3a82c4, { r: 0.88 }),
+  foundationSlabMat: createMaterial(0x7a8189, { r: 0.72, map: getFoundationSlabTexture() }),
 };
 
 export const ASSET_BUILDERS = {
   // --- EHITUS & TARINDID ---
   foundationSlab: () => {
     const g = new THREE.Group();
-    g.add(box(6, 0.25, 5, MAT.concrete, 0, 0.125, 0));
+    const slabW = 5.2, slabD = 4.2, slabH = 0.32;
+    // 1. Tihendatud killustikupadi / liivalus maapinnal
+    g.add(box(slabW + 0.6, 0.08, slabD + 0.6, MAT.sand, 0, 0.04, 0));
+    // 2. Külmakerke perimeetri soojustusriba (EPS 120 / Finnfoam)
+    g.add(box(slabW + 0.4, 0.05, slabD + 0.4, MAT.epsBlue, 0, 0.085, 0));
+    // 3. Tumehall L-elementidest isoleeritud soklirõngas
+    g.add(box(slabW, slabH - 0.06, slabD, MAT.darkSocle, 0, (slabH - 0.06) / 2 + 0.06, 0));
+    // 4. Põrandaalune 200 mm EPS 200 soojustuskiht
+    g.add(box(slabW - 0.2, 0.20, slabD - 0.2, MAT.epsBlue, 0, 0.16, 0));
+    // 5. Monoliitne raudbetoonist põrandaplaat (100 mm C25/30)
+    g.add(box(slabW - 0.04, 0.10, slabD - 0.04, MAT.foundationSlabMat, 0, slabH - 0.05, 0));
+    // 6. Sokli ülaääre tsingitud või pulbervärvitud veeplekid servadel
+    const lipT = 0.02, lipH = 0.015;
+    g.add(box(slabW + 0.02, lipH, lipT, MAT.blackMetal, 0, slabH - 0.01, slabD / 2));
+    g.add(box(slabW + 0.02, lipH, lipT, MAT.blackMetal, 0, slabH - 0.01, -slabD / 2));
+    g.add(box(lipT, lipH, slabD + 0.02, MAT.blackMetal, slabW / 2, slabH - 0.01, 0));
+    g.add(box(lipT, lipH, slabD + 0.02, MAT.blackMetal, -slabW / 2, slabH - 0.01, 0));
     return mark(g, 'foundationSlab', 'scenery');
   },
   deckModule: () => {
@@ -738,20 +766,260 @@ export const ASSET_BUILDERS = {
   },
   stove: () => {
     const g = new THREE.Group();
-    g.add(box(0.48, 0.68, 0.48, MAT.metal, 0, 0.34, 0));
-    g.add(cyl(0.05, 0.05, 1.3, MAT.metal, 0, 1.25, 0));
+    // 1. Roostevaba tulekaitseplaat põrandal
+    g.add(box(0.68, 0.015, 0.68, MAT.stainlessSteel, 0, 0.008, 0));
+    // 2. Kuumakaitseplaat tagaseinal (tuleohutus)
+    g.add(box(0.72, 1.55, 0.03, MAT.heatShield, 0, 0.78, -0.32));
+    // 3. Tornkerise silindriline roostevaba võrkkorv (HUUM / Harvia tüüpi)
+    const basketR = 0.24, basketH = 0.96;
+    g.add(cyl(basketR, basketR * 0.95, basketH, MAT.blackMetal, 0, basketH / 2 + 0.02, 0, 24));
+    g.add(cyl(basketR + 0.01, basketR + 0.01, basketH, MAT.stainlessSteel, 0, basketH / 2 + 0.02, 0, 16));
+    // 4. Looduslikud ümarad saunakivid korvis ja kuhjas peal
+    const stoneMats = [MAT.saunaStone, MAT.charcoalConcrete];
+    for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * Math.PI * 2 * 3;
+      const sr = (Math.random() * 0.16 + 0.04);
+      const sy = basketH * 0.25 + (i / 28) * (basketH * 0.72);
+      const sx = Math.cos(a) * sr;
+      const sz = Math.sin(a) * sr;
+      const mat = stoneMats[i % 2];
+      const sMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.048 + Math.random() * 0.02, 1), mat);
+      sMesh.position.set(sx, sy, sz);
+      sMesh.rotation.set(Math.random(), Math.random(), Math.random());
+      sMesh.castShadow = true;
+      g.add(sMesh);
+    }
+    // Kerise kividest kuhi peal
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sr = Math.random() * (basketR * 0.75);
+      const sMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.052, 1), MAT.saunaStone);
+      sMesh.position.set(Math.cos(a) * sr, basketH + 0.02 + Math.random() * 0.04, Math.sin(a) * sr);
+      sMesh.rotation.set(Math.random(), Math.random(), Math.random());
+      g.add(sMesh);
+    }
+    // 5. Kerise sisemine soe kütteelementide kuma
+    g.add(cyl(0.12, 0.12, 0.45, MAT.warmLedGlow, 0, basketH * 0.5, 0, 8));
+    // 6. Roostevaba isoleeritud suitsutoru / korsten siibriga
+    g.add(cyl(0.075, 0.075, 1.45, MAT.stainlessSteel, 0, basketH + 0.72, 0, 16));
+    g.add(cyl(0.09, 0.09, 0.06, MAT.blackMetal, 0, basketH + 0.45, 0, 16)); // suitsusiiber
+    // 7. Puidust kaarduv turvapiire (termohaab)
+    const guardR = basketR + 0.11;
+    const guardY = 0.74;
+    // Turvapiirde toed ja puidust rõngas
+    [-0.24, 0.24].forEach(x => {
+      g.add(box(0.035, guardY, 0.035, MAT.thermoAspen, x, guardY / 2, 0.18));
+    });
+    g.add(box(guardR * 2 + 0.04, 0.04, 0.05, MAT.thermoAspen, 0, guardY, guardR * 0.85));
+    g.add(box(0.05, 0.04, guardR * 0.8, MAT.thermoAspen, -guardR, guardY, guardR * 0.4));
+    g.add(box(0.05, 0.04, guardR * 0.8, MAT.thermoAspen, guardR, guardY, guardR * 0.4));
+
     return mark(g, 'stove', 'furniture');
   },
+
+  // Professionaalne ergonoomiline L-kujuline leililava termohaavast koos seljatoe ja LED-valgusega
+  saunaLavaL: () => {
+    const g = new THREE.Group();
+    const benchW = 1.76; // Pikkus piki põhilava seina (sobitub täpselt leiliruumi laiusega)
+    const benchD = 1.80; // Sügavus piki külgseina
+    const topH = 1.05;   // Ülemise leililava kõrgus
+    const lowH = 0.52;   // Alumise istelava kõrgus
+    const stepH = 0.26;  // Astmepingi kõrgus
+    const topSeatD = 0.65; // Ülemise lava sügavus
+    const lowSeatD = 0.45; // Alumise lava sügavus
+
+    // --- 1. Kandev karkass & jalad (termo-mänd/kuusk 45x95 mm) ---
+    const legCoords = [
+      [-benchW / 2 + 0.05, -benchD / 2 + 0.05],
+      [benchW / 2 - 0.05, -benchD / 2 + 0.05],
+      [-benchW / 2 + 0.05, benchD / 2 - 0.05],
+      [benchW / 2 - 0.05, benchD / 2 - 0.05],
+      [-benchW / 2 + 0.05 + topSeatD, benchD / 2 - 0.05 - topSeatD],
+      [benchW / 2 - 0.05, benchD / 2 - 0.05 - topSeatD],
+    ];
+    legCoords.forEach(([lx, lz]) => {
+      g.add(box(0.06, topH, 0.06, MAT.woodDark, lx, topH / 2, lz));
+    });
+
+    // --- 2. Ülemine leililava (põhiosa + L-tiib) ---
+    // Põhiosa (tagaseina ääres)
+    const topMainW = benchW;
+    const topMainZ = benchD / 2 - topSeatD / 2;
+    g.add(box(topMainW, 0.045, topSeatD, MAT.thermoAspen, 0, topH - 0.022, topMainZ));
+    // L-kujuline külgtiib (ühendatud täisnurga all)
+    const sideTopLen = benchD - topSeatD;
+    const sideTopX = -benchW / 2 + topSeatD / 2;
+    const sideTopZ = -benchD / 2 + sideTopLen / 2;
+    g.add(box(topSeatD, 0.045, sideTopLen, MAT.thermoAspen, sideTopX, topH - 0.022, sideTopZ));
+
+    // Ülemise lava puitliistude ribistus (individuaalsed lipid 15 mm vahedega)
+    for (let i = -7; i <= 7; i++) {
+      g.add(box(topMainW - 0.02, 0.015, 0.032, MAT.thermoWood, 0, topH + 0.005, topMainZ + (i * 0.04)));
+    }
+    // Ümar ülaserv ja esiliist (round nose edge)
+    g.add(box(topMainW, 0.055, 0.025, MAT.thermoAspen, 0, topH - 0.025, topMainZ - topSeatD / 2));
+    g.add(box(0.025, 0.055, sideTopLen, MAT.thermoAspen, sideTopX + topSeatD / 2, topH - 0.025, sideTopZ));
+
+    // --- 3. Alumine astmelava / jalatugi (L-kujuline) ---
+    const lowMainZ = topMainZ - topSeatD / 2 - lowSeatD / 2;
+    g.add(box(topMainW - topSeatD, 0.045, lowSeatD, MAT.thermoAspen, topSeatD / 2, lowH - 0.022, lowMainZ));
+    const sideLowX = sideTopX + topSeatD / 2 + lowSeatD / 2;
+    g.add(box(lowSeatD, 0.045, sideTopLen, MAT.thermoAspen, sideLowX, lowH - 0.022, sideTopZ));
+    // Alumise lava esiliist
+    g.add(box(topMainW - topSeatD, 0.05, 0.02, MAT.thermoAspen, topSeatD / 2, lowH - 0.025, lowMainZ - lowSeatD / 2));
+    g.add(box(0.02, 0.05, sideTopLen, MAT.thermoAspen, sideLowX + lowSeatD / 2, lowH - 0.025, sideTopZ));
+
+    // --- 4. Vertikaalsed lavapõlled (skirting / variliistud astmete vahel) ---
+    g.add(box(topMainW - topSeatD, topH - lowH - 0.05, 0.02, MAT.thermoAspen, topSeatD / 2, (topH + lowH) / 2 - 0.02, topMainZ - topSeatD / 2 + 0.02));
+    g.add(box(0.02, topH - lowH - 0.05, sideTopLen, MAT.thermoAspen, sideTopX + topSeatD / 2 - 0.02, (topH + lowH) / 2 - 0.02, sideTopZ));
+
+    // --- 5. Liigutatav astmepink (step bench) ees mugavaks pealeastumiseks ---
+    const stepW = 1.15, stepD = 0.42;
+    const stepX = topSeatD / 2 + 0.15;
+    const stepZ = lowMainZ - lowSeatD / 2 - stepD / 2 - 0.02;
+    g.add(box(stepW, 0.04, stepD, MAT.thermoAspen, stepX, stepH - 0.02, stepZ));
+    // Astmepingi jalad
+    [-stepW / 2 + 0.04, stepW / 2 - 0.04].forEach(sx => {
+      [-stepD / 2 + 0.04, stepD / 2 - 0.04].forEach(sz => {
+        g.add(box(0.05, stepH, 0.05, MAT.woodDark, stepX + sx, stepH / 2, stepZ + sz));
+      });
+    });
+
+    // --- 6. Ergonoomiline kumer seljatugi (Backrest) seintel ---
+    // Tagaseina seljatugi
+    g.add(box(topMainW - 0.04, 0.22, 0.04, MAT.thermoAspen, 0, topH + 0.38, benchD / 2 - 0.03));
+    g.add(box(topMainW - 0.06, 0.03, 0.02, MAT.thermoWood, 0, topH + 0.38, benchD / 2 - 0.05));
+    // Külgseina seljatugi
+    g.add(box(0.04, 0.22, sideTopLen + 0.2, MAT.thermoAspen, -benchW / 2 + 0.03, topH + 0.38, sideTopZ + 0.1));
+
+    // --- 7. Ergonoomilised termohaavast peatoed (Headrests) ---
+    const hr1 = box(0.38, 0.09, 0.26, MAT.thermoAspen, benchW / 2 - 0.35, topH + 0.045, topMainZ);
+    hr1.rotation.y = 0.1;
+    g.add(hr1);
+    const hr2 = box(0.26, 0.09, 0.38, MAT.thermoAspen, sideTopX, topH + 0.045, -benchD / 2 + 0.35);
+    hr2.rotation.y = -0.1;
+    g.add(hr2);
+
+    // --- 8. Turvaline puidust käepide / äärepiire lava otsas ---
+    g.add(cyl(0.022, 0.022, 0.95, MAT.thermoAspen, benchW / 2 - 0.04, topH + 0.35, lowMainZ));
+    g.add(box(0.04, 0.05, lowSeatD + topSeatD, MAT.thermoAspen, benchW / 2 - 0.04, topH + 0.45, (topMainZ + lowMainZ) / 2));
+
+    // --- 9. Integreeritud soe LED-peitvalgustus lava all ja seljatoe taga ---
+    g.add(box(topMainW - 0.1, 0.015, 0.015, MAT.warmLedGlow, 0, topH - 0.06, topMainZ - topSeatD / 2 + 0.02));
+    g.add(box(topMainW - 0.1, 0.015, 0.015, MAT.warmLedGlow, 0, topH + 0.26, benchD / 2 - 0.02));
+    g.add(box(0.015, 0.015, sideTopLen - 0.1, MAT.warmLedGlow, sideTopX + topSeatD / 2 - 0.02, topH - 0.06, sideTopZ));
+
+    return mark(g, 'saunaLavaL', 'furniture');
+  },
+
+  // 2-tasandiline sirge leililava astmelauaga
+  saunaLavaStraight: () => {
+    const g = new THREE.Group();
+    const w = 2.05, topD = 0.65, lowD = 0.45, topH = 1.05, lowH = 0.52, stepH = 0.26;
+    // Karkassijalad
+    [-w / 2 + 0.05, w / 2 - 0.05].forEach(x => {
+      g.add(box(0.06, topH, 0.06, MAT.woodDark, x, topH / 2, 0.25));
+      g.add(box(0.06, lowH, 0.06, MAT.woodDark, x, lowH / 2, -0.25));
+    });
+    // Ülemine lava
+    g.add(box(w, 0.045, topD, MAT.thermoAspen, 0, topH - 0.022, 0.25));
+    g.add(box(w, 0.055, 0.025, MAT.thermoAspen, 0, topH - 0.025, 0.25 - topD / 2));
+    // Alumine lava
+    g.add(box(w, 0.045, lowD, MAT.thermoAspen, 0, lowH - 0.022, -0.25));
+    g.add(box(w, 0.05, 0.02, MAT.thermoAspen, 0, lowH - 0.025, -0.25 - lowD / 2));
+    // Lavapõll
+    g.add(box(w, topH - lowH - 0.04, 0.02, MAT.thermoAspen, 0, (topH + lowH) / 2 - 0.02, 0.25 - topD / 2 + 0.02));
+    // Astmepink
+    g.add(box(1.2, 0.04, 0.38, MAT.thermoAspen, 0, stepH - 0.02, -0.25 - lowD / 2 - 0.22));
+    [-0.55, 0.55].forEach(sx => {
+      g.add(box(0.05, stepH, 0.05, MAT.woodDark, sx, stepH / 2, -0.25 - lowD / 2 - 0.22));
+    });
+    // Seljatugi seinal
+    g.add(box(w - 0.04, 0.22, 0.04, MAT.thermoAspen, 0, topH + 0.38, 0.25 + topD / 2 - 0.03));
+    // LED-valgusriba
+    g.add(box(w - 0.1, 0.015, 0.015, MAT.warmLedGlow, 0, topH - 0.05, 0.25 - topD / 2 + 0.02));
+    // Peatugi
+    g.add(box(0.38, 0.09, 0.26, MAT.thermoAspen, 0.5, topH + 0.045, 0.25));
+
+    return mark(g, 'saunaLavaStraight', 'furniture');
+  },
+
+  // Saunatarvikute komplekt (leilikibu, puidust kulp, termomeeter ja kaseviht)
+  saunaAccessories: () => {
+    const g = new THREE.Group();
+    // 1. Puidust leilikibu vitsadega
+    g.add(cyl(0.13, 0.10, 0.18, MAT.thermoAspen, 0, 0.09, 0, 16));
+    g.add(cyl(0.132, 0.102, 0.015, MAT.blackMetal, 0, 0.04, 0, 16)); // vits 1
+    g.add(cyl(0.132, 0.102, 0.015, MAT.blackMetal, 0, 0.14, 0, 16)); // vits 2
+    g.add(cyl(0.12, 0.12, 0.02, MAT.water, 0, 0.15, 0, 16)); // vesi kibus
+    // Kibu sang
+    g.add(box(0.03, 0.14, 0.015, MAT.thermoAspen, 0, 0.23, 0.11));
+    // 2. Puidust pika varrega saunakulp
+    const ladle = new THREE.Group();
+    ladle.add(cyl(0.012, 0.012, 0.44, MAT.thermoWood, 0, 0.22, 0));
+    ladle.add(cyl(0.045, 0.025, 0.06, MAT.thermoWood, 0, 0.03, 0.03));
+    ladle.rotation.x = Math.PI / 4;
+    ladle.rotation.z = -0.3;
+    ladle.position.set(0.08, 0.12, 0);
+    g.add(ladle);
+    // 3. Traditsiooniline leheroheline saunaviht
+    const whisk = new THREE.Group();
+    whisk.add(cyl(0.02, 0.02, 0.15, MAT.bark, 0, 0.075, 0)); // viha käepide
+    whisk.add(box(0.18, 0.09, 0.38, MAT.leafDark, 0, 0.05, 0.25)); // vihalehed
+    whisk.position.set(-0.28, 0.04, 0.05);
+    whisk.rotation.y = 0.4;
+    g.add(whisk);
+    // 4. Seinale riputatav puust termomeeter / hügromeeter
+    const thermo = box(0.24, 0.13, 0.02, MAT.thermoAspen, 0, 0.65, -0.35);
+    thermo.add(cyl(0.038, 0.038, 0.01, MAT.whiteMetal, -0.055, 0, 0.015, 16)); // temp skaala
+    thermo.add(cyl(0.038, 0.038, 0.01, MAT.whiteMetal, 0.055, 0, 0.015, 16));  // niiskusskaala
+    g.add(thermo);
+
+    return mark(g, 'saunaAccessories', 'furniture');
+  },
+
+  // Karastatud klaasuks leiliruumi (80x205 cm)
+  saunaGlassDoor: () => {
+    const g = new THREE.Group();
+    const dw = 0.80, dh = 2.05, dt = 0.01;
+    // Puidust leng
+    g.add(box(0.05, dh, 0.08, MAT.thermoAspen, -dw / 2, dh / 2, 0));
+    g.add(box(0.05, dh, 0.08, MAT.thermoAspen, dw / 2, dh / 2, 0));
+    g.add(box(dw, 0.05, 0.08, MAT.thermoAspen, 0, dh - 0.025, 0));
+    // Pronksjas karastatud klaas
+    g.add(box(dw - 0.08, dh - 0.1, dt, MAT.saunaGlass, 0, dh / 2, 0));
+    // Vertikaalne puidust magnetkäepide
+    g.add(box(0.035, 0.42, 0.035, MAT.thermoAspen, dw / 2 - 0.12, 1.0, 0.04));
+    g.add(box(0.035, 0.42, 0.035, MAT.thermoAspen, dw / 2 - 0.12, 1.0, -0.04));
+    // Roostevabad hinged
+    g.add(box(0.025, 0.08, 0.04, MAT.stainlessSteel, -dw / 2 + 0.04, dh * 0.25, 0));
+    g.add(box(0.025, 0.08, 0.04, MAT.stainlessSteel, -dw / 2 + 0.04, dh * 0.75, 0));
+    return mark(g, 'saunaGlassDoor', 'furniture');
+  },
+
   lavaLong: () => {
     const g = new THREE.Group();
-    g.add(box(0.55, 0.4, 1.8, MAT.woodLight, 0, 0.2, 0));
-    g.add(box(0.55, 0.4, 1.8, MAT.woodDark, 0, 0.6, 0));
+    const w = 1.9, topH = 1.0, lowH = 0.5;
+    // Kahetasandiline sirge puitlava
+    [-w / 2 + 0.05, w / 2 - 0.05].forEach(x => {
+      g.add(box(0.05, topH, 0.05, MAT.woodDark, x, topH / 2, 0.2));
+      g.add(box(0.05, lowH, 0.05, MAT.woodDark, x, lowH / 2, -0.2));
+    });
+    g.add(box(w, 0.04, 0.6, MAT.thermoAspen, 0, topH - 0.02, 0.2));
+    g.add(box(w, 0.04, 0.45, MAT.thermoAspen, 0, lowH - 0.02, -0.2));
+    g.add(box(w, topH - lowH - 0.03, 0.02, MAT.thermoAspen, 0, (topH + lowH) / 2, -0.1));
     return mark(g, 'lavaLong', 'furniture');
   },
+
   lavaShort: () => {
     const g = new THREE.Group();
-    g.add(box(1.1, 0.4, 0.55, MAT.woodLight, 0, 0.2, 0));
-    g.add(box(1.1, 0.4, 0.55, MAT.woodDark, 0, 0.6, 0));
+    const w = 1.1, h = 0.45;
+    g.add(box(w, 0.04, 0.45, MAT.thermoAspen, 0, h - 0.02, 0));
+    g.add(box(w - 0.1, 0.03, 0.35, MAT.thermoAspen, 0, h / 2 - 0.02, 0.25));
+    [-w / 2 + 0.05, w / 2 - 0.05].forEach(x => {
+      g.add(box(0.045, h, 0.045, MAT.woodDark, x, h / 2, -0.18));
+      g.add(box(0.045, h / 2, 0.045, MAT.woodDark, x, h / 4, 0.25));
+    });
     return mark(g, 'lavaShort', 'furniture');
   },
 
