@@ -4,3 +4,7 @@
 pb_data/
 **/node_modules/
 *.zip
+.test-data/
+.storage.json
+.storage.json.*
+*.session-key

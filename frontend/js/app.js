@@ -4,6 +4,7 @@
  * Täielik arhitektuurne mudeldus, maastikukujundus, katus, ruumid, ehituslik mahutabel (BOM)
  */
 import * as THREE from 'three';
+import { validateProject, escapeHtml } from './project-data.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
@@ -715,6 +716,7 @@ let roofConfig = {
   visible: true,
 };
 const roofGroup = new THREE.Group();
+const defaultRoofConfig = { ...roofConfig };
 layers.roof.add(roofGroup);
 
 function uid() {
@@ -1985,10 +1987,41 @@ function placeGardenShedTemplate() {
 
 // Tagasivõtmise (Undo) süsteem
 const history = [];
+const future = [];
 let cloudProjectId = null;
+const RECOVERY_KEY = 'kodudisain.workspace.v1';
+let recoveryReady = false;
+let recoveryTimer;
+
+function updateHistoryButtons() {
+  document.getElementById('btn-undo').disabled = history.length < 2;
+  const redo = document.getElementById('btn-redo');
+  if (redo) redo.disabled = !future.length;
+}
+
+function saveRecovery() {
+  if (!recoveryReady) return;
+  const state = document.querySelector('.save-state');
+  try {
+    localStorage.setItem(RECOVERY_KEY, JSON.stringify(payload()));
+    state.textContent = 'Salvestatud selles brauseris';
+    state.dataset.state = 'saved';
+  } catch {
+    state.textContent = 'Kohalik salvestus ebaõnnestus';
+    state.dataset.state = 'error';
+  }
+}
+
+function scheduleRecovery() {
+  if (!recoveryReady) return;
+  clearTimeout(recoveryTimer);
+  document.querySelector('.save-state').textContent = 'Salvestan…';
+  recoveryTimer = setTimeout(saveRecovery, 600);
+}
 
 function snap() {
   return {
+    name: document.getElementById('project-name').value,
     walls: JSON.parse(JSON.stringify(walls)),
     rooms: JSON.parse(JSON.stringify(rooms)),
     measurements: JSON.parse(JSON.stringify(measurements)),
@@ -2006,22 +2039,34 @@ function snap() {
         z: o.position.z,
         ry: o.rotation.y,
         s: o.scale.x,
+        name: o.userData.name,
+        visible: o.visible,
+        finish: o.userData.customFinish,
       })),
   };
 }
 
 function pushHist(label) {
+  future.length = 0;
   history.push(snap());
   if (history.length > 40) history.shift();
+  updateHistoryButtons();
+  scheduleRecovery();
 }
 
 function restore(s) {
   if (!s) return;
+  s = structuredClone(s);
+  if (s.name) document.getElementById('project-name').value = s.name;
   clearEditable();
   walls = s.walls || [];
   rooms = s.rooms || [];
   measurements = s.measurements || [];
   if (s.roofConfig) roofConfig = { ...roofConfig, ...s.roofConfig };
+  for (const [id, key] of [['roof-type-select', 'type'], ['roof-pitch', 'pitch'], ['roof-overhang', 'overhang'], ['roof-material-select', 'material']]) {
+    const input = document.getElementById(id);
+    if (input) input.value = roofConfig[key];
+  }
   if (s.plotConfig) {
     plotConfig = { ...plotConfig, ...s.plotConfig };
     const pw = document.getElementById('plot-width'); if (pw) pw.value = plotConfig.width;
@@ -2041,7 +2086,10 @@ function restore(s) {
     const o = addAsset(x.type, x.x, x.z, x.ry, x.s || 1);
     if (o) {
       o.userData.uid = x.uid;
-      o.position.y = x.y;
+      if (Number.isFinite(x.y)) o.position.y = x.y;
+      if (x.name) o.userData.name = x.name;
+      if (x.visible === false) o.visible = false;
+      if (x.finish) applyFurnitureFinish(o, x.finish);
     }
   });
   deselect();
@@ -2051,9 +2099,21 @@ function restore(s) {
 
 function undo() {
   if (history.length < 2) return;
-  history.pop();
+  future.push(history.pop());
   restore(history[history.length - 1]);
+  updateHistoryButtons();
+  scheduleRecovery();
   setStatus('Viimane tegevus tagasi võetud');
+}
+
+function redo() {
+  if (!future.length) return;
+  const next = future.pop();
+  history.push(next);
+  restore(next);
+  updateHistoryButtons();
+  scheduleRecovery();
+  setStatus('Tegevus uuesti tehtud');
 }
 
 function payload() {
@@ -2067,12 +2127,15 @@ function payload() {
 }
 
 function apply(data) {
-  if (data.name) document.getElementById('project-name').value = data.name;
+  validateProject(data);
+  cloudProjectId = null;
+  document.getElementById('project-name').value = data.name || 'Projekt';
   restore({
     walls: data.walls || [],
     rooms: data.rooms || [],
     measurements: data.measurements || [],
-    roofConfig: data.roofConfig || null,
+    roofConfig: data.roofConfig || { ...defaultRoofConfig },
+    plotConfig: data.plotConfig || { ...PLOT_DEFAULTS, maxCoverage: PLOT_DEFAULTS.maxCoveragePct },
     trace: data.trace || null,
     objects: data.objects || data.layout || [],
   });
@@ -3407,25 +3470,30 @@ document.getElementById('btn-dup').onclick = () => {
 };
 
 document.getElementById('btn-undo').onclick = undo;
+document.getElementById('btn-redo').onclick = redo;
+document.getElementById('project-name').addEventListener('change', () => pushHist());
+window.addEventListener('pagehide', saveRecovery);
 document.getElementById('btn-save').onclick = () => {
   const data = payload();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
   a.download = (data.name || 'projekt').replace(/\s+/g, '-').toLowerCase() + '-kodudisain.json';
   a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   setStatus('Projekt failina alla laaditud');
 };
 document.getElementById('btn-open').onclick = () => document.getElementById('file-open').click();
 document.getElementById('file-open').onchange = e => {
   const f = e.target.files?.[0];
   if (!f) return;
+  if (f.size > 16 * 1024 * 1024) { setStatus('Projektifail on liiga suur (maksimaalselt 16 MB)'); e.target.value = ''; return; }
   const r = new FileReader();
   r.onload = () => {
     try {
       apply(JSON.parse(r.result));
       setStatus('Avatud fail: ' + f.name);
-    } catch {
-      setStatus('Vigane failivorming');
+    } catch (error) {
+      setStatus(error.message || 'Vigane failivorming');
     }
   };
   r.readAsText(f);
@@ -3433,9 +3501,9 @@ document.getElementById('file-open').onchange = e => {
 };
 document.getElementById('btn-new').onclick = () => {
   if (confirm('Kas soovid tühjendada töölaua ja alustada uut projekti?')) {
-    clearEditable();
-    history.length = 0;
-    pushHist();
+    cloudProjectId = null;
+    document.getElementById('project-name').value = 'Uus projekt';
+    apply({ name: 'Uus projekt', walls: [], objects: [], roofConfig: { ...defaultRoofConfig, type: 'none' } });
     refreshList();
     refreshQuote();
     setStatus('Uus puhas projekt');
@@ -3475,6 +3543,8 @@ document.getElementById('btn-rebuild-roof')?.addEventListener('click', () => {
 // Mallide laadimine rippmenüüst
 document.getElementById('template-select')?.addEventListener('change', e => {
   const v = e.target.value;
+  if (!confirm('Asenda praegune töölaud näidisprojektiga? Soovi korral laadi oma projekt esmalt failina alla.')) { e.target.value = ''; return; }
+  cloudProjectId = null;
   if (v === 'sauna') placeSaunaTemplate();
   else if (v === 'house') placeHouseTemplate();
   else if (v === 'garden_shed') placeGardenShedTemplate();
@@ -5532,9 +5602,12 @@ canvas.addEventListener('drop', e => {
 
 // Klaviatuuri kiirklahvid (Blender & CAD)
 window.addEventListener('keydown', e => {
-  if (e.target.matches('input,textarea,select')) return;
+  if (e.target.matches('input,textarea,select') || e.target.isContentEditable || document.querySelector('.modal:not(.hidden)')) return;
   const k = e.key.toLowerCase();
   const code = e.code;
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); document.getElementById('btn-save').click(); return; }
 
   if (['w', 'a', 's', 'd'].includes(k) && isWalking) {
     walkKeys[k] = true;
@@ -5549,7 +5622,7 @@ window.addEventListener('keydown', e => {
   if (code === 'NumpadDecimal' || k === '.' || k === 'f') { e.preventDefault(); focusSelected(); return; }
 
   // Blender Shading režiimide tsükkel (Z klahv)
-  if (k === 'z' && !e.ctrlKey && !e.metaKey) {
+  if (k === 'z' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
     e.preventDefault();
     const modes = ['material', 'solid', 'wire', 'rendered'];
     const nextIdx = (modes.indexOf(currentShadingMode) + 1) % modes.length;
@@ -5917,7 +5990,19 @@ function updateFpsCounter() {
 }
 
 // Käivita saunamall ja disainitööriistad vaikimisi
-placeSaunaTemplate();
+let recovered = false;
+if (!new URLSearchParams(location.search).has('share')) {
+  try {
+    const saved = localStorage.getItem(RECOVERY_KEY);
+    if (saved) { apply(JSON.parse(saved)); recovered = true; }
+  } catch { setStatus('Kohaliku projekti taastamine ebaõnnestus. Ava salvestatud JSON-fail.'); }
+}
+if (!recovered) placeSaunaTemplate();
+recoveryReady = true;
+if (recovered) saveRecovery();
+else scheduleRecovery();
+if (window.innerWidth <= 900) togglePropsPanel(false);
+if (window.innerWidth <= 650) toggleCatalogPanel(false);
 rebuildPlotMesh();
 updateCompassUi();
 renderRoomModules();
@@ -5956,7 +6041,7 @@ resize();
   updateFpsCounter();
 })();
 
-setStatus('KoduDisain ' + APP.phase);
+setStatus(recovered ? 'Sinu viimane töölaud on taastatud' : 'Vali ruum vasakult või alusta seinte joonistamist klahviga W');
 
 // ========== Konto & Pilv (PocketBase API) ==========
 function refreshAuthUI() {
@@ -6002,8 +6087,8 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
   const pass = document.getElementById('auth-pass')?.value || '';
   const name = document.getElementById('auth-name')?.value?.trim() || '';
   const st = document.getElementById('auth-status');
-  if (!email || pass.length < 6) {
-    st.textContent = 'E-post ja parool (min 6 märki) vajalikud';
+  if (!email || (authMode === 'register' ? pass.length < 8 : !pass)) {
+    st.textContent = 'Sisesta e-post ja parool (uuel kontol vähemalt 8 märki)';
     return;
   }
   st.textContent = 'Ootan…';
@@ -6051,9 +6136,9 @@ async function renderProjectsList() {
     }
     el.innerHTML = items.map(r => `
       <div class="proj-item" data-id="${r.id}">
-        <span class="name">${r.name || 'Projekt'}</span>
+        <span class="name">${escapeHtml(r.name || 'Projekt')}</span>
         <button type="button" data-load="${r.id}">Ava</button>
-        <button type="button" data-share="${r.id}">Jaga</button>
+        <button type="button" data-share="${r.id}">${r.is_public ? 'Peata jagamine' : 'Jaga'}</button>
         <button type="button" data-del="${r.id}" class="danger">✕</button>
         <span class="meta">${r.updated ? new Date(r.updated).toLocaleString('et-EE') : ''}</span>
       </div>`).join('');
@@ -6062,8 +6147,8 @@ async function renderProjectsList() {
       b.onclick = async () => {
         try {
           const rec = await loadProject(b.dataset.load);
-          cloudProjectId = rec.id;
           apply(rec.data || rec);
+          cloudProjectId = rec.id;
           document.getElementById('project-name').value = rec.name || 'Projekt';
           document.getElementById('projects-modal')?.classList.add('hidden');
           setStatus('Avatud pilvest: ' + rec.name);
@@ -6073,7 +6158,14 @@ async function renderProjectsList() {
     el.querySelectorAll('[data-share]').forEach(b => {
       b.onclick = async () => {
         try {
-          const rec = await setShare(b.dataset.share, true);
+          const current = await loadProject(b.dataset.share);
+          const rec = await setShare(b.dataset.share, !current.is_public);
+          if (!rec.is_public) {
+            document.getElementById('share-url').textContent = '';
+            setStatus('Jagamine peatatud. Vana link enam ei ava projekti.');
+            renderProjectsList();
+            return;
+          }
           const url = shareUrl(rec);
           document.getElementById('share-url').textContent = url;
           try { await navigator.clipboard.writeText(url); } catch {}
@@ -6085,13 +6177,15 @@ async function renderProjectsList() {
     el.querySelectorAll('[data-del]').forEach(b => {
       b.onclick = async () => {
         if (!confirm('Kustuta projekt pilvest?')) return;
-        await deleteProject(b.dataset.del);
-        if (cloudProjectId === b.dataset.del) cloudProjectId = null;
-        renderProjectsList();
+        try {
+          await deleteProject(b.dataset.del);
+          if (cloudProjectId === b.dataset.del) cloudProjectId = null;
+          renderProjectsList();
+        } catch (error) { setStatus('Kustutamine ebaõnnestus: ' + error.message); }
       };
     });
   } catch (e) {
-    el.innerHTML = '<p class="muted">Viga: ' + (e.message || e) + '</p>';
+    el.textContent = 'Viga: ' + (e.message || e);
   }
 }
 
@@ -6128,7 +6222,7 @@ document.getElementById('btn-share')?.addEventListener('click', async () => {
   refreshAuthUI();
   onAuthChange(() => refreshAuthUI());
   const ok = await checkHealth();
-  if (!ok) setStatus('PocketBase API ei vasta – lokaalne JSON töötab');
+  if (!ok) setStatus('Pilveteenus ei vasta. Projekt salvestatakse selles brauseris; varukoopia saad menüüst Projekt.');
   const params = new URLSearchParams(location.search);
   const share = params.get('share');
   if (share) {

@@ -4,7 +4,7 @@
 import { getPb, isLoggedIn, currentUser } from './auth.js';
 
 function token() {
-  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  return Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export async function listMyProjects() {
@@ -51,20 +51,15 @@ export async function setShare(id, enabled) {
 }
 
 export async function loadByShareToken(tok) {
+  if (!/^[a-zA-Z0-9_-]{16,128}$/.test(tok)) throw new Error('Vigane jagamislink');
   // Public list may include is_public; token filter on view
   const pb = getPb();
   const list = await pb.collection('projects').getList(1, 1, {
+    share: tok,
     filter: `share_token = "${tok}" && is_public = true`,
   });
   if (list.items.length) return list.items[0];
-  // try direct if rule allows query token
-  try {
-    return await pb.collection('projects').getFirstListItem(`share_token = "${tok}"`, {
-      // some PB versions need auth or public
-    });
-  } catch {
-    throw new Error('Jagatud projekti ei leitud');
-  }
+  throw new Error('Jagatud projekti ei leitud või jagamine on lõpetatud');
 }
 
 export function shareUrl(rec) {
