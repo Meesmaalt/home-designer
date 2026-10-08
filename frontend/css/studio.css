@@ -1,0 +1,112 @@
+/* A quieter workspace. All advanced controls stay available in their menus. */
+:root { --bg:#f4f5f2; --panel:#fff; --panel-subtle:#f6f7f4; --border:#e4e7e0; --border-strong:#cbd2c8; --text:#29342d; --muted:#717b73; --accent:#32654d; --accent-hover:#254d3b; --accent-soft:#edf3ee; --top:68px; --catalog-w:270px; --props-w:280px; }
+body { font-size:13px; }
+.startup-error { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:min(360px,85%); padding:24px; background:white; border:1px solid var(--border); border-radius:12px; z-index:10; text-align:center; }
+.startup-error p { color:var(--muted); line-height:1.6; }
+button { border-radius:7px; min-height:32px; box-shadow:none; }
+button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+#topbar { padding:0 20px; gap:24px; height:var(--top); box-shadow:none; }
+.brand { width:auto; gap:10px; }
+.logo { background:var(--accent); box-shadow:none; width:34px; height:34px; border-radius:10px; font-size:16px; }
+.brand-copy strong { font-size:15px; font-weight:650; }
+.brand-copy small { font-size:10px; margin-top:4px; }
+.project-heading { grid-template-columns:1fr; flex:1; min-width:100px; }
+.project-kicker { display:none; }
+#project-name { width:100%; max-width:310px; font-size:13px; height:25px; padding-left:0; }
+.save-state { border:0; padding:0; margin:0; font-size:10px; }
+.save-state::before { content:'•'; margin-right:5px; }
+.save-state[data-state="error"] { color:var(--danger); }
+.top-actions { margin-left:0; gap:6px; }
+.top-actions button, .top-actions .studio-menu > summary { height:34px; min-height:34px; padding:7px 10px; font-size:12px; width:auto; }
+.top-actions > .icon-button { width:32px; padding:0; }
+.top-actions > #btn-cloud-save { padding:7px 14px; }
+.top-actions > #btn-cloud-save .button-label { display:inline; }
+.studio-menu { position:relative; }
+.studio-menu > summary { list-style:none; cursor:pointer; border-radius:7px; padding:7px 11px; min-height:32px; color:var(--text); user-select:none; }
+.studio-menu > summary::-webkit-details-marker { display:none; }
+.studio-menu > summary::after { content:'⌄'; margin-left:9px; color:var(--muted); }
+.studio-menu[open] > summary, .studio-menu > summary:hover { background:var(--panel-subtle); }
+.studio-menu-content { position:absolute; right:0; top:calc(100% + 8px); width:260px; max-height:min(70vh,520px); overflow:auto; background:white; border:1px solid var(--border); border-radius:12px; padding:8px; box-shadow:0 12px 40px #243b2926; display:flex; flex-direction:column; gap:4px; z-index:50; }
+.studio-menu-content button { justify-content:flex-start; text-align:left; width:100%; height:auto; min-height:35px; border-color:transparent; padding:8px 10px; font-size:12px; }
+.studio-menu-content .button-label { display:inline; }
+.studio-menu-content .auth-chip { display:flex; flex-wrap:wrap; padding-top:6px; border-top:1px solid var(--border); }
+.studio-menu-content .template-selector-wrap, .studio-menu-content select { width:100%; max-width:100%; }
+.studio-menu-content .template-selector-wrap select { padding:9px; }
+.studio-menu-content .shading-modes { position:static; display:grid; grid-template-columns:1fr 1fr; box-shadow:none; background:var(--panel-subtle); }
+.studio-menu-content .hud-level-selector { display:flex; }
+.panel-heading { padding:22px 18px 16px; }
+.panel-heading h2 { font-size:18px; font-weight:600; letter-spacing:-.5px; margin-top:5px; }
+.eyebrow { font-size:10px; font-weight:500; text-transform:none; letter-spacing:.02em; }
+.catalog-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:3px; padding:0 12px 14px; background:transparent; }
+.catalog-tabs button { font-size:11px; min-height:34px; border:0; font-weight:500; background:transparent; }
+.catalog-tabs button.active { background:var(--accent-soft); color:var(--accent); }
+.tool-section { padding:16px; border-bottom:1px solid var(--border); }
+.section-label { font-size:11px; text-transform:none; letter-spacing:0; }
+.section-label small { display:none; }
+.hint-sm { font-size:11px; line-height:1.6; color:var(--muted); }
+.room-module-card { padding:12px; border-radius:9px; box-shadow:none; gap:8px; }
+.room-module-card:hover { box-shadow:none; background:var(--panel-subtle); }
+.room-module-icon { background:var(--panel-subtle); }
+.room-module-chips { display:none; }
+.room-module-desc { font-size:11px; line-height:1.5; }
+.room-module-title { font-size:12px; font-weight:600; }
+.room-module-card button { font-size:11px; }
+.inspector-card { margin:12px; border-radius:9px; box-shadow:none; }
+.empty-selection { padding:24px 12px; }
+.empty-selection p { font-size:11px; line-height:1.6; }
+.viewport-top { top:18px; left:20px; right:20px; align-items:center; }
+.scene-title { background:transparent; border:0; box-shadow:none; padding:0; }
+.scene-title small { display:none; }
+.scene-title strong { font-size:12px; font-weight:500; }
+.scene-dot { width:6px; height:6px; }
+.view-modes { margin-left:auto; border:1px solid var(--border); background:#ffffffed; padding:4px; border-radius:9px; box-shadow:none; }
+.view-modes button { font-size:12px; min-height:30px; padding:5px 12px; }
+#hud { top:70px; left:20px; right:auto; max-width:calc(100% - 40px); padding:5px; border-radius:9px; border-color:var(--border); gap:2px; flex-wrap:nowrap; box-shadow:none; background:#ffffffed; }
+#hud > button { display:inline-flex; align-items:center; justify-content:center; height:30px; min-height:30px; padding:5px 8px; font-size:11px; }
+#hud > .icon-button { width:28px; min-height:30px; height:30px; }
+#hud .studio-menu-content button { display:block; height:auto; min-height:34px; font-size:12px; }
+#hud .studio-menu-content { left:0; right:auto; width:240px; }
+#blender-nav-gizmo { top:122px; right:18px; opacity:.8; }
+#toolbar { border-radius:10px; box-shadow:0 4px 14px #243b2912; }
+#status { min-height:32px; font-size:10px; background:#ffffffed; }
+#status-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.shortcut-help, #cad-fps, #cad-shading { display:none; }
+.cad-readouts { margin-left:auto; }
+.cad-pill { border:0; background:transparent; font-size:10px; }
+.modal { z-index:100; }
+.modal-box { border-radius:16px; box-shadow:0 24px 80px #243b2933; max-height:90dvh; overflow:auto; }
+@media (max-width:1100px) { :root { --catalog-w:240px; --props-w:250px; } #topbar { gap:14px; padding:0 14px; } .brand-copy small { display:none; } }
+@media (max-width:900px) {
+  #workspace, #workspace.catalog-collapsed, #workspace.props-collapsed { grid-template-columns:var(--catalog-w) minmax(0,1fr); }
+  #workspace.catalog-collapsed, #workspace.zen-mode { grid-template-columns:minmax(0,1fr); }
+  #props-panel { position:absolute; width:270px; right:0; top:0; bottom:0; z-index:15; transform:none; }
+  #workspace.props-collapsed #props-panel { display:none; }
+  .scene-title { display:none; }
+  #hud { left:12px; top:64px; max-width:calc(100% - 24px); }
+  .viewport-top { left:12px; right:12px; top:14px; }
+  #btn-toggle-props-top { display:inline-flex; }
+}
+@media (max-width:650px) {
+  :root { --top:62px; }
+  #topbar { padding:0 10px; gap:8px; }
+  .brand-copy, .save-state, #btn-toggle-props-top, .top-actions > #btn-redo { display:none; }
+  .top-actions > #btn-cloud-save { padding:6px; width:30px; }
+  .top-actions > #btn-cloud-save .button-label { display:none; }
+  .logo { width:30px; height:30px; }
+  .project-heading { min-width:0; }
+  #project-name { font-size:12px; width:100%; }
+  .top-actions { gap:0; }
+  .top-actions .studio-menu > summary { font-size:11px; padding:8px 6px; }
+  #workspace, #workspace.catalog-collapsed, #workspace.props-collapsed { grid-template-columns:minmax(0,1fr); }
+  #catalog { position:absolute; z-index:16; top:0; left:0; bottom:0; width:min(290px,86vw); transform:none; }
+  #workspace.catalog-collapsed #catalog { display:none; }
+  #props-panel { width:min(280px,86vw); }
+  #hud { flex-wrap:nowrap; }
+  #hud > #btn-grid, #hud > #btn-dims { display:none; }
+  #hud .studio-menu-content { left:auto; right:0; }
+  .view-modes { margin-left:36px; }
+  .cad-readouts { display:none; }
+  .studio-menu-content { width:min(260px,85vw); }
+  #blender-nav-gizmo { display:none; }
+}
+@media (prefers-reduced-motion:reduce) { *, *::before, *::after { transition:none !important; animation:none !important; scroll-behavior:auto !important; } }
